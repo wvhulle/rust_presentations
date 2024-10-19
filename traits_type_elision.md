@@ -174,10 +174,15 @@ On the other hand, S.g() calls the trait method g. Auto-ref during method resolu
 
 ---
 
+### Auto-referencing
+
 <!-- column_layout: [2, 1] -->
 
 <!-- column: 0 -->
 
+
+
+#### Question
 
 ```rust 
 trait Trait: Sized {
@@ -344,7 +349,7 @@ Disadvantages of generic structs:
 
 Syntax: `impl<A>` blocks.
 - All type parameters of the struct being implement should be declared
-- All type parameters have to be constrained
+- Type parameters can be constrained
 - Constraints can be moved to a `where` block
 - Constraints apply to all the method definitions
 - If a generic parameter only applies to a function, you should move it to the mothod. Otherwise you will get `unconstraint type parameter` compiler errors.
@@ -352,109 +357,215 @@ Syntax: `impl<A>` blocks.
 ---
 
 
-## Generic traits
+## Traits with type parameters
 
+<!-- column_layout: [2, 1] -->
 
-Semantics
-- Collect contraints on type parameters and give them a name
+<!-- column: 0 -->
+
+Semantics:
+- Group methods that are not about a particular struct but about a whole class of structs
+
 
 Syntax:
+- A list of type parameters (generics) is declared 
+- Type parameters can take defaults, this is useful for traits related to binary operator:
+
+Example:
 
 ```rust
-trait Trait<T> {
-    fn get_item(&self) -> T;
+pub trait PartialEq<Rhs = Self> {
+    fn eq(&self, other: &Rhs) -> bool;
+    fn ne(&self, other: &Rhs) -> bool { !self.eq(other) }
 }
-```
 
-Disadvantages:
-
-- In `impl` blocks you have to declare all the type parameters of the trait
-
-
-Examples
-
-- `AsRef<T>`
-- Custom traits
-
-Important
-
-
-
-### Non-generic associated type traits
-
-Semantics
-- Useful for cases were there is a 1-to-1 relationship mapping from a generic type to its generic type parameters.
-- In other words, there is only one type that fits in the hole of a type parameter for a given generic type.
-
-Syntax
-
-- You move the declaration of the type parameter below the name of the trait: 
-
-```rust
-trait Trait {
-    type Item;
-    
-    fn get_item(&self) -> Self::Item;
-    
+struct Point {
+    x: i32,
+    y: i32,
 }
-```
-- Then you can declare new functions that use this trait. 
 
-```rust
-fn get_item_from_trait<T: Trait>(t: T) -> T::Item {
-  t.get_item()
+impl PartialEq<(i32, i32)> for Point {
+    fn eq(&self, other: &(i32, i32)) -> bool {
+        self.x == other.0 && self.y == other.1
+    }
 }
+
+let p = Point { x: 1, y: 2 };
+let result = p == (1, 2);  // true
+
 ```
-
-Benefits
-- You are not required to specify the particular instances for the chosen associated types, when you call something bounded by it
-- You can assign names type arguments and use them when referencing the trait
-
-Disadvantages
-- Not all generic traits can be rewritten as traits with associated types.
+<!-- column: 1 -->
 
 
-Examples:
+Advantages:
+- Deduplicate code
 
-- Iterators
-  - What are some useful iterator combinators?
-- Futures
-- Deref
+<!-- pause -->
 
-
-
----
-## Generic traits with associated types
-
-
-
----
 ## Trait bounds
 
-Trait bounds can be applied to type parameters. They constrain the possible input types. At compile time the compiler will try to compute concrete types that satisfy the trait bounds. 
+Type parameters in trait definitions may have constraints. At compile time:
+- Perform type inference = checking whether the program is well-typed
+- Try to compute concrete constructable types that satisfy the trait bounds. 
 
 ### Where to write bounds
 
 Trait bounds can appear in
 
-- struct definitions
-- trait definitions
-- impl definitions
-
-They can either appear
 
 - inline: `GenericType<SomeGenericParameter: SomeTrait>`
 - where clauses: `where SomeGenericParameter: SomeTrait`
 
+Disadvantages:
+- Each time you implement the trait inside `impl` blocks you have to include all the trait bounds from the trait definition
+
+
+---
+
+
+### Traits with associated types
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+Semantics
+- There is a 1-to-1 relationship mapping from a generic type to its generic type parameters.
+- There is only one type that fits in the hole of a type parameter for a given generic type.
+
+Syntax: move the declaration of the type parameter below the name of the trait: 
+
+```rust
+pub trait IntoIterator {
+    type Item;
+    type IntoIter: Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter;
+}
+```
+<!-- pause -->
+
+
+```rust
+struct Buffer<T> { data: Vec<T> }
+
+impl<T> Buffer<T> {
+    fn new(data: Vec<T>) -> Self {
+        Buffer { data }
+    }
+}
+
+impl<T> IntoIterator for Buffer<T> {
+    type Item = T; 
+    type IntoIter = std::vec::IntoIter<T>; 
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
+}
+```
+
+
+<!-- column: 1  -->
+
+<!-- pause -->
+
+One more example:
+
+```rust
+pub trait Future {
+    type Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
+}
+```
+
+<!-- pause -->
+
+Benefits
+- When you reference such a trait as a type bound, you are not required to specify all the associated types, only the ones that you need
+- You can use the names of the associated types instead of their order of definition when you specify them
+
+Disadvantages
+- Not all generic traits can be rewritten as traits with associated types.
+
+---
+
+
+## Generic traits with associated types
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+Some traits have both:
+- generic type parameters 
+- associated types
+
+```rust
+pub trait Add<Rhs = Self> {
+    type Output;
+
+    fn add(self, rhs: Rhs) -> Self::Output;
+}
+```
+
+<!-- pause -->
+
+
+```rust
+use std::ops::Add;
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Point<T> {
+    x: T,
+    y: T,
+}
+```
+
+<!-- column: 1 -->
+
+
+Conditional implementations of generic traits:
+
+```rust
+
+// Notice that the implementation uses the associated type `Output`.
+impl<T: Add<Output = T>> Add for Point<T> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+
+assert_eq!(Point { x: 1, y: 0 } + Point { x: 2, y: 3 },
+           Point { x: 3, y: 3 });
+```
+
+Notice the **named** associated type
+
+---
+
 ### Supertraits
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
 
 Semantics:
 - Inherit methods from a more general trait
 
 Syntax:
-`pub trait SomeTrait: SuperTrait {}`
 
 
+<!-- column: 1 -->
+
+
+---
 
 ### Inheritance in Rust
 
