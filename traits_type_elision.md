@@ -429,11 +429,9 @@ Disadvantages:
 
 <!-- column: 0 -->
 
-Semantics
-- There is a 1-to-1 relationship mapping from a generic type to its generic type parameters.
-- There is only one type that fits in the hole of a type parameter for a given generic type.
+A 1-to-1 map from a generic type to its generic type parameters.
 
-Syntax: move the declaration of the type parameter below the name of the trait: 
+Move the declaration of the type parameter below the name of the trait: 
 
 ```rust
 pub trait IntoIterator {
@@ -488,15 +486,12 @@ Benefits
 
 Disadvantages
 - Not all generic traits can be rewritten as traits with associated types.
-
+- You have to use the names of the associated types
 ---
 
 
 ## Generic traits with associated types
 
-<!-- column_layout: [2, 1] -->
-
-<!-- column: 0 -->
 
 Some traits have both:
 - generic type parameters 
@@ -510,8 +505,13 @@ pub trait Add<Rhs = Self> {
 }
 ```
 
-<!-- pause -->
+---
 
+
+
+## Conditional implementations
+
+Define a new generic struct
 
 ```rust
 use std::ops::Add;
@@ -523,14 +523,9 @@ struct Point<T> {
 }
 ```
 
-<!-- column: 1 -->
-
-
-Conditional implementations of generic traits:
+Restrict the `T` this implementation applies to.
 
 ```rust
-
-// Notice that the implementation uses the associated type `Output`.
 impl<T: Add<Output = T>> Add for Point<T> {
     type Output = Self;
 
@@ -552,33 +547,108 @@ Notice the **named** associated type
 
 ### Supertraits
 
+Inherit methods or properties from another trait
+
 <!-- column_layout: [2, 1] -->
 
 <!-- column: 0 -->
 
-Semantics:
-- Inherit methods from a more general trait
+```rust
+trait Person {
+    fn name(&self) -> String;
+}
 
-Syntax:
+// Person is a supertrait of Student.
+// Implementing Student requires you to also impl Person.
+trait Student: Person {
+    fn university(&self) -> String;
+}
 
+trait Programmer {
+    fn fav_language(&self) -> String;
+}
+```
 
 <!-- column: 1 -->
 
+
+CompSciStudent (computer science student) is a subtrait of both Programmer and Student. 
+
+Implementing CompSciStudent requires you to impl both supertraits.
+
+```rust
+trait CompSciStudent: Programmer + Student {
+    fn git_username(&self) -> String;
+}
+```
+
+A kind of **multiple inheritance**
+
+---
+
+### Method resolution
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+
+
+```rust
+pub trait SuperTrait {
+    fn method(&self) {
+        println!("Super")
+    }
+}
+
+pub trait SubTrait: SuperTrait {
+    fn method(&self) {
+        println!("Sub")
+    }
+}
+
+impl SuperTrait for char { }
+
+impl SubTrait for char { }
+```
+<!-- column: 1 -->
+
+
+
+
+```rust
+fn main() {
+    '?'.method()
+}
+```
+
+Rust does not allow ambiguous method names
+
+
+```
+   |
+24 |     '?'.method()
+   |         ^^^^^^ multiple `method` found
+```
+
+Explicit qualification of the trait is necessary.
 
 ---
 
 ### Inheritance in Rust
 
-You might want to replicate inheritance in Rust.
+Coming from object-oriented languages, you might want to repeat patterns.
 
-Since the only things that can inherit are traits, you might try to replace structs by traits.
+Design patterns such a multiple inheritance work different in Rust.
 
-This is wrong. Instead use:
+Simply replacing generic structs by generic traits is not enough.
 
-- separate, differently constrained impl blocks
-- traits with supertraits
+1. Analyze structs
+2. Look for shared functionality
+3. Decompose functionality in orthogonal traits
+4. Use multiple supertraits for multiple inheritance
 
-An advantage of this approach is that trait bounds can be composed with `+`
+---
 
 ### Fixing violated type bounds
 
@@ -586,60 +656,116 @@ If some type bound is not satisfied, the compiler will give an error.
 
 How to fix the error:
 
-- Are you in an impl block outside of a trait? 
-  - Look at the contraints of the impl block.
-    - They are in front of the impl block or behind in a where clause.
-    - They are unordered, so do not verify the order
-  - If you don't find any errors, verify the contraints of the struct.
-    - Look at the order of the inline generic type parameters in the declaration
-    - Look at the order the order of occurence of application of type generics in the impl. 
-    - Look for a mismatched order.
-    - Look in the where clauses around the struct for unsatisfied bounds. They are unordered.
-    - Break down composed (with a +-sign) bounds and check them individually.
-- Are you in an impl block in a trait?
-  - Do the same.
-  - Look at the constraints in the trait definition.
-  - Look at the constraints imposed by supertrait bounds.
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+Are you in an impl block outside of a trait? 
+
+- Look at the contraints of the `impl` block.
+   - They are in front of the impl block or behind in a where clause.
+   - They are unordered, so do not verify the order
+- Verify the contraints of the struct.
+  - Compare the order of
+     - the generic type parameters in the `struct` declaration
+     - the type generics in the `impl`: `impl<A,B> for Struct<A,B>`. 
+   - Look in the where clauses around the struct for unsatisfied bounds. They are unordered.
+- Always break down combined trait bounds and check them individually.
+
+<!-- column: 1 -->
+
+Are you in an impl block in a trait?
+
+- Do the same as outside an `impl` block.
+- Look at the constraints in the trait definition.
+- Look at the constraints imposed by supertrait bounds.
+
+---
 
 ### Multi-threading bounds
 
-Send
-- definition: “safe to be move between threads” = thread safe
-    - transfer ownership to other thread
-    - other thread becomes responsible for dropping object
-    - share a mutable reference to another thread
-- automatically implemented by compiler based on some rules
-- examples
-    - which types are send?
-        - Structs without references are Send + 'static
-        - Structs with fields that are references with lower-bound lifetime parameter `'a` are `Send + 'a`
-        - `Cell`
-    - Not send
-        - `*mut T`
-Sync
-- definition: 
-  - `&T` is Send.
-- semantics
-  - safe to access immutably from several threads in parallel
-- Rules
-  - Pointers are in one-to-one corresponds with pointers to pointers (`&T = &TT`). This implies that `T : Sync <=> &'_ T : Sync`.
-      - A consequence of this is that if `T: !Sync` then `&'_ T: !Sync`
-  - Examples:
-    - `Arc`
-  - Counterexamples
-    - `Rc` is a reference pointing to an unsynchronized mutable handle `Cell` so not sync
-    - `RefCell`.
+Auto-traits are traits that are implemented automatically by the compiler. They are the most common trait bounds. Examples:
 
-  
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+#### Send
+
+Definition: 
+- “safe to be move between threads”
+- **thread safe**
+
+Semantics:
+  - transfer ownership to other thread
+  - other thread becomes responsible for dropping object
+  - share a mutable reference to another thread
+
+- automatically implemented by compiler based on some rules
+
+Examples:
+- Structs without references are `Send + 'static`
+- Structs with fields that are references with lower-bound lifetime parameter `'a` are `Send + 'a`
+- `Cell`
+
+Counterexamples:
+- `*mut T`
+
+
+<!-- column: 1 -->
+#### Sync
+
+Definition: `&T` is Send.
+
+Semantics: safe to access immutably from several threads in parallel
+
+Rules
+- Pointers are in one-to-one corresponds with pointers to pointers (`&T = &TT`). This implies that `T : Sync <=> &'_ T : Sync`.
+- A consequence of this is that if `T: !Sync` then `&'_ T: !Sync`
+
+Examples: `Arc`
+
+Counterexamples:
+- `Rc`
+- `RefCell`.
+
+---
+
+### Inheritance of Sync
+
+Question: in which cases does `Arc<T>` implement Send?
+
+<!-- pause -->
+
+Answer: `T` must implement `Send`.
+
+Why?
+
+<!-- pause -->
+
+`Arc<T>` may move `T` to another thread if the last handle is on another thread.
+
+<!-- pause -->
+
+
+Question: in which cases does `Arc<T>` implement Sync?
+<!-- pause -->
+
+Answer: `T` must implement `Sync`.
+
+
+---
+
 ### Combinations
 
-https://stackoverflow.com/questions/68704717/is-the-sync-trait-a-strict-subset-of-the-send-trait-what-implements-sync-withou
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
 
 Common combinations
 - `Send + !Sync`: 
-  - original !Sync type
-  - Semantics:
-    - may be accessed from any thread but only one at a time
+  - Semantics: may be accessed from any thread but only one at a time
   - Examples
     - `Cell`
       - set inner value
@@ -649,55 +775,97 @@ Common combinations
       - removes compile-time borrow checks
       - may panic
 - `!Send + !Sync`, 
-  - Semantics:
-    - types that manipulate shared handles to `!Sync` types
+  - Semantics: types that manipulate shared handles to `!Sync` types
   - Examples
     - `Rc<T>`
     - Raw pointers
 
-Rare combination: 
-- `!Send + Sync`:
-  - Semantics
-    - may be accessed immutably from any thread and multiple in parallel
-    - mutable access has to happen on the thread it was created on
-    - transferring a &mut T to another thread is not possible since it would break the protections that !Send has
-  - Examples
-    - `MutexGuard` of a `T` https://users.rust-lang.org/t/example-of-a-type-that-is-not-send/59835/3
-      - cannot be dropped in a different thread, so it is not Send
-      - If `T` is sync then it follows from `T : Sync ⇔ &'_ T : Sync` that a `MutexGuard<T>` is Sync
+
+<!-- column: 1 -->
+
+
+Rare combination: `!Send + Sync`:
+
+Semantics
+- may be accessed immutably from any thread and multiple in parallel
+- mutable access has to happen on the thread it was created on
+- transferring a &mut T to another thread is not possible since it would break the protections that !Send has
+
+Example: `MutexGuard` of a `T` [See](https://users.rust-lang.org/t/example-of-a-type-that-is-not-send/59835/3)
+- cannot be dropped in a different thread, so it is not Send
+- If `T` is sync then it follows from `T : Sync ⇔ &'_ T : Sync` that a `MutexGuard<T>` is Sync
+
+<!-- reset_layout -->
+
+
+[See](https://stackoverflow.com/questions/68704717/is-the-sync-trait-a-strict-subset-of-the-send-trait-what-implements-sync-withou)
+
 ---
+
+
 ## Lifetime bounds
 
 Structs or types can contain references. In that case they receive a lifetime parameter. 
 
 Syntax:
-
+ 
 - Structs: lifetime parameters are written before the generic type arguments. 
 - Functions: lifetime parameters are written before the argument list 
 
-Semantics:
+<!-- pause -->
 
-- `T: 'a` You can hold on `T` 
-  - for the lifetime `'a` 
-  - until you move it out
+**Question**: What does `T: 'a` mean?
+
+<!-- pause -->
+
+**Answer**: You can hold on `T` 
+- for the lifetime `'a` 
+- until you move it out
+
+
+<!-- pause -->
 
 Rules/corollary:
 
 - `&'a T => T: 'a`, since a reference to T of lifetime 'a cannot be valid for 'a if T itself is not valid for 'a
 
-Examples:
 
-- `T: 'static` can be one of the following options
-  - `T` does not contain any lifetimes
-  - `T` is an owned variable
+<!-- pause -->
+
+**Question**: What does `T: 'static` mean?:
+
+<!-- pause -->
+
+**Answer**:
+- `T` does not contain any lifetimes
+- `T` is an owned variable
+
+Every type parameter for values that have to be send between (worker) threads has to have the bound `'static`.
+
+---
 
 ### Questions
 
-- What is the difference between `T : 'static` and `&'static T`?
+**Question**: What is the difference between `T : 'static` and `&'static T`?
 
-- What is the difference between `let s = &'static "bla"` and `let s = "bla".to_string()`
-  - `let s = &'static "bla"` is hardcoded in the binary, cannot be declared mutable,  cannot be moved
-  - `let s = "bla".to_string()` is allocated on the heap, can be declared mutable
+
+<!-- pause -->
+
+**Answer**: 
+- `T : 'static` means that `T` must not contain any non-`'static` references.
+- `&'static T` means that this is a reference that lives forever.
+
+
+
+<!-- pause -->
+
+**Question**: What is the difference between `let s = &'static "bla"` and `let s = "bla".to_string()`
+
+<!-- pause -->
+
+**Answer**:
+- `let s = &'static "bla"` is hardcoded in the binary, cannot be declared mutable,  cannot be moved
+- `let s = "bla".to_string()` is allocated on the heap, can be declared mutable
 ---
 ## Lifetime bounds in methods
 
@@ -735,6 +903,8 @@ Every function (or every distinct instantiation of a generic function) has its o
 
 Type itself encodes the information of what function will be called. At runtime no function pointers are needed.
 
+---
+
 ### Size of function items
 
 #### Question
@@ -757,6 +927,7 @@ fn main() {
 ```
 0
 ```
+
 ---
 ## Function pointers
 
@@ -777,17 +948,10 @@ fn main() {
   - Primitive type, not a trait
 
 
+---
 
-```rust
-fn my_function(x: i32) -> i32 {
-    x + 1
-}
+### How to create function pointers
 
-fn main() {
-    let f: fn(i32) -> i32 = my_function; // f is a function pointer
-    println!("Size of f: {}", std::mem::size_of_val(&f)); // Output: 8 (on 64-bit)
-}
-```
 
 - How can it be created?
     - non-capturing closures
@@ -801,7 +965,24 @@ fn main() {
 
 When is it particularly useful?
 - When using FFI with languages that don't support closures
+
+---
+
 ### Size of function pointers
+
+
+```rust
+fn my_function(x: i32) -> i32 {
+    x + 1
+}
+
+fn main() {
+    let f: fn(i32) -> i32 = my_function; // f is a function pointer
+    println!("Size of f: {}", std::mem::size_of_val(&f)); // Output: 8 (on 64-bit)
+}
+```
+
+---
 
 https://dtolnay.github.io/rust-quiz/34
 
@@ -838,6 +1019,8 @@ fn main() {
 
 The first call in main coerces `a::<u8>` from a function to a function pointer (`fn(fn(u8)) {a::<u8>}` to `fn(fn(u8))`) prior to calling d, so its size would be 8 on a system with 64-bit function pointers
 The second call in main does not involve function pointers; d is directly called with T being the inexpressible type of `a::<u8>`, which is zero-sized.
+
+---
 
 ### Function pointer fields
 
@@ -890,6 +1073,8 @@ fn main() {
   - Has an implicit call method defined
 - Syntax
   - Complete type cannot be written explicitly   
+
+---
 
 ### Tuples versus grouping
 
@@ -955,7 +1140,9 @@ fn main() {
 ```
 
 Two distinct lifetimes are created for the input and output type. For normal functions, only one lifetime is created.
+
 ---
+
 ## Closure implementations
 
 How are they implemented? https://huonw.github.io/blog/2015/05/finding-closure-in-rust/
@@ -969,15 +1156,17 @@ How are they implemented? https://huonw.github.io/blog/2015/05/finding-closure-i
 Disadvantages
 - The exact type of a closure struct cannot be written out to type an input or output argument 
 
-Solutions
-
-- A trait object object has to be used
+Solution: use a trait object
 
 ```rust
 fn returns_closure() -> Box<dyn Fn(i32) -> i32> {
     Box::new(|x| x + 1)
 }
 ```
+
+---
+
+### Move
 
 You can change the default behaviour to only create references to the surrounding environment. You can also move variables inside the struct representing the environment of the closure. This is done by using the move keyword.
 - takes ownership of variables in the surrounding scope
@@ -995,6 +1184,9 @@ There are different kinds of closures based on the signature of their call metho
         - values that were moved from the containing scope (and only use them by reference afterwards)
     - can be called from anywhere, multiple times
     - Must implement FnMut
+
+---
+
 - FnMut:
     - the signature is (& mut self)
     - the closure can have
@@ -1002,6 +1194,9 @@ There are different kinds of closures based on the signature of their call metho
         - immutable references to its containing scope
     - cannot consume or move out captured variables
     - can be called more than once, but only once at a time, must implement FnOnce
+
+---
+
 - FnOnce
     - signature is call(self)
     - can only be called once
@@ -1013,6 +1208,8 @@ There are different kinds of closures based on the signature of their call metho
     - and mutate,
     - implemented by every closure
   - Only implement copy clone send and sync when their contents do
+
+---
 
 ### Interpretation of the return keyword
 
@@ -1062,7 +1259,7 @@ fn main() {
 ```
 Will output 1 since a call to x returns another closure that returns a bool.
 
-
+---
 ### Ranges and FnOnce
 
 https://dtolnay.github.io/rust-quiz/33
@@ -1120,6 +1317,8 @@ The iterator returned by into_iter may yield any of T, &T or &mut T, depending o
 
 The iterator returned by iter will yield &T, by convention.
 
+---
+
 ### Lazy map
 
 https://dtolnay.github.io/rust-quiz/26
@@ -1151,6 +1350,9 @@ fn main() {
 #### Long answer
 
 The closure provided as an argument to map is only invoked as values are consumed from the resulting iterator. The closure is not applied eagerly to the entire input stream up front.---
+
+---
+
 ## Type elision / erasure
 
 Sometimes
@@ -1175,6 +1377,7 @@ Benefits of opaque types
 - cleaner API
 - underlying concrete type can be an unnameable type
    
+---
 
 ### Trait objects
 
@@ -1195,6 +1398,8 @@ First type of opaque types is a **trait object**:
     - cannot have generic methods
     - The return type isn't Self.
 
+
+---
 
 ### Dynamic versus static dispatch
 
@@ -1236,6 +1441,8 @@ fn main() {
 - Dynamic dispatch: The forwarding is done by reading from a table of function pointers contained within the trait object. Expanded to `<dyn Base as Base>::method`. Since the argument was obtained by converting a BothTraits to dyn Base, the automatically generated implementation detail will wind up forwarding to `<BothTraits as Base>::method` which prints 1.
 - Static dispatch: Type inference within generic functions in Rust happens independently of any concrete instantiation of the generic function i.e. before we know what T may be, other than the fact that it implements Base. By the time that T is decided, it has already been determined that x.method() is calling `<T as Base>::method` or `<BothTraits as Base>::method` which prints 1.
 
+---
+
 ### Lifetimes for trait objects
 
 a trait object's lifetime bound is inferred from context
@@ -1243,8 +1450,6 @@ a trait object's lifetime bound is inferred from context
 Examples
 
 ```rust
-use std::cell::Ref;
-
 trait Trait {}
 
 // elided
@@ -1261,6 +1466,15 @@ impl dyn Trait + 'static {}
 type T3<'a> = &'a dyn Trait;
 // expanded, &'a T requires T: 'a, so inferred as 'a
 type T4<'a> = &'a (dyn Trait + 'a);
+
+
+```
+
+
+---
+
+```rust
+use std::cell::Ref;
 
 // elided
 type T5<'a> = Ref<'a, dyn Trait>;
@@ -1279,7 +1493,10 @@ impl<'a> dyn GenericTrait<'a> {}
 // expanded
 impl<'a> dyn GenericTrait<'a> + 'a {}
 ```
+
 https://github.com/pretzelhammer/rust-blog/blob/master/posts/common-rust-lifetime-misconceptions.md#6-boxed-trait-objects-dont-have-lifetimes
+
+---
 
 ### DSTs
 
@@ -1292,16 +1509,9 @@ Syntax
 Semantics
 - Types that don't fit on the stack as local variables by value
 
-Examples
-- slices: fat pointer has address and length
-- trait objects:
 
-Related concepts:
-- References to DSTs are called **fat pointers.** https://stackoverflow.com/questions/57754901/what-is-a-fat-pointer
 
-Counterexamples? Most types are not DSTs because their size is known at compile time.
-- They implement the trait Sized
-- DSTs don't implement Sized
+---
 
 ### Examples of DSTs
 
@@ -1310,6 +1520,16 @@ Examples
   - str
 - trait objects:
   - dyn Trait
+
+Related concepts:
+- References to DSTs are called **fat pointers.** https://stackoverflow.com/questions/57754901/what-is-a-fat-pointer
+
+Counterexamples? Most types are not DSTs because their size is known at compile time.
+- They implement the trait Sized
+- DSTs don't implement Sized
+
+
+---
 
 ### Impl trait
 
@@ -1329,7 +1549,13 @@ Implementation:
 - "return position impl Trait" (RPIT) in Trait definitions (allowed since dec 2023)
   - the anonymous type in the impl T return type is a kind of associated type
 
+---
 
+#### `impl` everywhere
+
+There is an effort underway to make `impl` type elision possible everywhere
+
+TODO
 
 ---
 ## New lifetime capture rules
@@ -1355,6 +1581,8 @@ fn main() {
     i.next(); // <-- assumed to access `&data`
 }
 ```
+
+---
 
 - use bound": `impl Trait + use<'x, T>`, for example, would indicate that 
   - the hidden type is allowed to use `'x` and `T`
