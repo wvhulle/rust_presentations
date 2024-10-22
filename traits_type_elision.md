@@ -293,45 +293,73 @@ fn main() {
 ---
 
 
-## Generic structs
+## Generic data types
 
 <!-- column_layout: [2, 1] -->
 
 <!-- column: 0 -->
 
-Synonyms
-- Generics in Python
-- Templates in C++
+
+### Slices
+
+
+### Structs
 
 
 
-Semantics
-- a struct that for which the fields have different types based on the type parameter
-
-Syntax
-- a placeholder type parameter that has to be specified before methods can be called
-
-Implementation
-
-<!-- pause -->
+### Enums
 
 
-- The compiler applies monomorphization to code contain generics.
-  
-
-How to improve efficiency?
-
-<!-- pause -->
-
-- Jon Gjengset: "define inner non-generic functions"
 
 
 <!-- column: 1 -->
 
-Advantages of generic structs:
+
+
+---
+
+
+## Polymorphism
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+
+```rust
+fn largest<T>(list: &[T]) -> &T {
+    let mut largest = &list[0];
+
+    for item in list {
+        if item > largest {
+            largest = item;
+        }
+    }
+
+    largest
+}
+
+fn main() {
+    let number_list = vec![34, 50, 25, 100, 65];
+
+    let result = largest(&number_list);
+    println!("The largest number is {result}");
+
+    let char_list = vec!['y', 'm', 'a', 'q'];
+
+    let result = largest(&char_list);
+    println!("The largest char is {result}");
+}
+```
+
+<!-- column: 1 -->
+
+
+Advantages of generic data types:
 
 - Less duplication of code
 - Easier to maintain
+
 
 
 Disadvantages of generic structs:
@@ -339,20 +367,17 @@ Disadvantages of generic structs:
 <!-- pause -->
 
 - You have to specify all the type parameters at the beginning of `impl` blocks.
-- All the type parameters need to be constrained by traits
 - You have to find out how to supply type parameters to method definitions
+
 
 ---
 
-
-## Generic method definitions
+### Methods for generic data types
 
 Syntax: `impl<A>` blocks.
 - All type parameters of the struct being implement should be declared
-- Type parameters can be constrained
-- Constraints can be moved to a `where` block
-- Constraints apply to all the method definitions
-- If a generic parameter only applies to a function, you should move it to the mothod. Otherwise you will get `unconstraint type parameter` compiler errors.
+- Declaring more type parameters than present gives an error
+
 
 ---
 
@@ -399,25 +424,6 @@ let result = p == (1, 2);  // true
 
 Advantages:
 - Deduplicate code
-
-<!-- pause -->
-
-## Trait bounds
-
-Type parameters in trait definitions may have constraints. At compile time:
-- Perform type inference = checking whether the program is well-typed
-- Try to compute concrete constructable types that satisfy the trait bounds. 
-
-### Where to write bounds
-
-Trait bounds can appear in
-
-
-- inline: `GenericType<SomeGenericParameter: SomeTrait>`
-- where clauses: `where SomeGenericParameter: SomeTrait`
-
-Disadvantages:
-- Each time you implement the trait inside `impl` blocks you have to include all the trait bounds from the trait definition
 
 
 ---
@@ -507,9 +513,111 @@ pub trait Add<Rhs = Self> {
 
 ---
 
+## Trait bounds
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
 
 
-## Conditional implementations
+### Position of trait bounds
+
+Every generic type parameter can be constrained by **trait bounds**.
+
+
+- inline: `GenericType<SomeGenericParameter: SomeTrait>`
+- When constraints become to complicated you should move them to `where` blocks: `where SomeGenericParameter: SomeTrait`
+
+
+```rust
+use std::ops::Add;
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Point<T: Add<Output = T>> {
+    x: T,
+    y: T,
+}
+
+impl<T> Add for Point<T> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+```
+
+<!-- column: 1 -->
+
+```txt
+error[E0277]: cannot add `T` to `T`
+ --> src/main.rs:9:17
+  |
+9 | impl<T> Add for Point<T> {
+  |                 ^^^^^^^^ no implementation for `T + T`
+  |
+note: required by a bound in `Point`
+ --> src/main.rs:4:17
+  |
+4 | struct Point<T: Add<Output = T>> {
+  |                 ^^^^^^^^^^^^^^^ required by this bound in `Point`
+help: consider restricting type parameter `T`
+  |
+9 | impl<T: std::ops::Add> Add for Point<T> {
+  |       +++++++++++++++
+```
+
+
+Be careful:
+- If you add trait bounds to generic structs, you have to specificy them in each `impl` block.
+- Same for traits
+
+
+
+---
+
+### Bad solution
+
+```rust
+impl<T: std::ops::Add> Add for Point<T> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+```
+
+<!-- pause -->
+
+Still not good
+
+```rust
+impl<T: std::ops::Add<Output = T>> Add for Point<T> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Self {
+            x: self.x + other.x,
+            y: self.y + other.y,
+        }
+    }
+}
+```
+
+Now we have both a long constraint on the struct and all the `impl` blocks.
+- Constraints apply to all the method definitions
+- We cannot easily add other functions to the `impl` blocks since they have to satisfy all the added constraints
+
+---
+
+## Blanket implementations
 
 Define a new generic struct
 
@@ -523,7 +631,7 @@ struct Point<T> {
 }
 ```
 
-Restrict the `T` this implementation applies to.
+Instead of adding the constraints to `Point`, we just add them to an `impl`.
 
 ```rust
 impl<T: Add<Output = T>> Add for Point<T> {
@@ -541,13 +649,49 @@ assert_eq!(Point { x: 1, y: 0 } + Point { x: 2, y: 3 },
            Point { x: 3, y: 3 });
 ```
 
-Notice the **named** associated type
+This is called a **blanket implementation** .
+
+Visible throughout all the crates, but can not be applied to purely foreign types
+
+If you start repeating the bounds in different blanket implementations, it might be time to put all the repeated bounds in  a new trait  
 
 ---
 
-### Supertraits
 
-Inherit methods or properties from another trait
+### Fixing violated type bounds
+
+If some type bound is not satisfied, the compiler will give an error.
+
+How to fix the error:
+
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+Are you in an `impl` block outside of a trait? 
+
+- Look at the contraints of the `impl` block.
+   - They are in front of the impl block or behind in a where clause.
+   - They are unordered, so do not verify the order
+- Verify the contraints of the struct.
+  - Compare the order of
+     - the generic type parameters in the `struct` declaration
+     - the type generics in the `impl`: `impl<A,B> for Struct<A,B>`. 
+   - Look in the where clauses around the struct for unsatisfied bounds. They are unordered.
+- Always break down combined trait bounds and check them individually.
+
+<!-- column: 1 -->
+
+Are you in an impl block in a `trait`?
+
+- Do the same as outside an `impl` block.
+- Look at the constraints in the trait definition.
+- Look at the constraints imposed by supertrait bounds.
+
+---
+
+## Supertraits
 
 <!-- column_layout: [2, 1] -->
 
@@ -569,12 +713,15 @@ trait Programmer {
 }
 ```
 
+<!-- pause -->
+
 <!-- column: 1 -->
 
 
-CompSciStudent (computer science student) is a subtrait of both Programmer and Student. 
+`CompSciStudent` (computer science student) is a subtrait of both Programmer and Student. 
 
-Implementing CompSciStudent requires you to impl both supertraits.
+
+Implementing `CompSciStudent` requires you to impl both supertraits.
 
 ```rust
 trait CompSciStudent: Programmer + Student {
@@ -582,17 +729,19 @@ trait CompSciStudent: Programmer + Student {
 }
 ```
 
-A kind of **multiple inheritance**
+### Inheritance
+
+Super traits allow to inherit methods from another trait: `Programmer + Student`
+
+Since you can inherit from multiple super traits it is a kind of **multiple inheritance**
 
 ---
 
-### Method resolution
+## Super traits and method resolution
 
 <!-- column_layout: [2, 1] -->
 
 <!-- column: 0 -->
-
-
 
 ```rust
 pub trait SuperTrait {
@@ -614,18 +763,20 @@ impl SubTrait for char { }
 <!-- column: 1 -->
 
 
-
-
 ```rust
 fn main() {
     '?'.method()
 }
 ```
 
-Rust does not allow ambiguous method names
+**Question**: what will this program output?
+
+<!-- pause -->
+
+**Answer**: Rust does not allow ambiguous method names
 
 
-```
+```txt
    |
 24 |     '?'.method()
    |         ^^^^^^ multiple `method` found
@@ -633,59 +784,60 @@ Rust does not allow ambiguous method names
 
 Explicit qualification of the trait is necessary.
 
----
-
-### Inheritance in Rust
-
-Coming from object-oriented languages, you might want to repeat patterns.
-
-Design patterns such a multiple inheritance work different in Rust.
-
-Simply replacing generic structs by generic traits is not enough.
-
-1. Analyze structs
-2. Look for shared functionality
-3. Decompose functionality in orthogonal traits
-4. Use multiple supertraits for multiple inheritance
+Overriding methods won't work. This rule is to keep code predictable. Traits can only **extend supertraits**.
 
 ---
 
-### Fixing violated type bounds
-
-If some type bound is not satisfied, the compiler will give an error.
-
-How to fix the error:
-
+## Moving bounds to super traits
 
 <!-- column_layout: [2, 1] -->
 
 <!-- column: 0 -->
 
-Are you in an impl block outside of a trait? 
+Sometimes trait bounds are repeated in different `impl` blocks.
 
-- Look at the contraints of the `impl` block.
-   - They are in front of the impl block or behind in a where clause.
-   - They are unordered, so do not verify the order
-- Verify the contraints of the struct.
-  - Compare the order of
-     - the generic type parameters in the `struct` declaration
-     - the type generics in the `impl`: `impl<A,B> for Struct<A,B>`. 
-   - Look in the where clauses around the struct for unsatisfied bounds. They are unordered.
-- Always break down combined trait bounds and check them individually.
+Solution:
+
+1. Create a new trait with a useful name
+2. Put the repeated bounds as super traits
+
+If you do this, you don't need to specify the bounds ever again besides specifying the subtrait.
+
+### Associated types in super traits
+
+
+Super traits that have associated types can also have bounds on the associated types.
+
+For example
+
+```rust
+trait SubTrait: AssociatedSuperTrait<State: Sync> {}
+```
+
+
+
+<!-- pause -->
 
 <!-- column: 1 -->
 
-Are you in an impl block in a trait?
+You can even reference a new associated type in the `SubTrait`:
 
-- Do the same as outside an `impl` block.
-- Look at the constraints in the trait definition.
-- Look at the constraints imposed by supertrait bounds.
+```rust
+trait SubTrait: AssociatedSuperTrait<State=Self::SubState> {}
+```
 
+If the associated type with name `State` has a lifetime parameter you can specify it with
+
+```rust
+trait SubTrait: for<'a> AssociatedSuperTrait<State<'a>: Sync> {}
+``` 
 ---
 
 ### Multi-threading bounds
 
-Auto-traits are traits that are implemented automatically by the compiler. They are the most common trait bounds. Examples:
+Auto-traits are traits that are implemented automatically by the compiler. 
+
+The most common trait bounds.
 
 <!-- column_layout: [2, 1] -->
 
@@ -702,7 +854,9 @@ Semantics:
   - other thread becomes responsible for dropping object
   - share a mutable reference to another thread
 
-- automatically implemented by compiler based on some rules
+Automatically implemented by compiler based on some rules (**auto-trait**)
+
+<!-- column: 1 -->
 
 Examples:
 - Structs without references are `Send + 'static`
@@ -712,9 +866,13 @@ Examples:
 Counterexamples:
 - `*mut T`
 
+---
 
-<!-- column: 1 -->
 #### Sync
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
 
 Definition: `&T` is Send.
 
@@ -724,6 +882,9 @@ Rules
 - Pointers are in one-to-one corresponds with pointers to pointers (`&T = &TT`). This implies that `T : Sync <=> &'_ T : Sync`.
 - A consequence of this is that if `T: !Sync` then `&'_ T: !Sync`
 
+<!-- column: 1 -->
+
+
 Examples: `Arc`
 
 Counterexamples:
@@ -732,13 +893,13 @@ Counterexamples:
 
 ---
 
-### Inheritance of Sync
+### Inheritance of `Send` and `Sync`
 
-Question: in which cases does `Arc<T>` implement Send?
+**Question**: in which cases does `Arc<T>` implement Send?
 
 <!-- pause -->
 
-Answer: `T` must implement `Send`.
+**Answer**: `T` must implement `Send`.
 
 Why?
 
@@ -749,7 +910,7 @@ Why?
 <!-- pause -->
 
 
-Question: in which cases does `Arc<T>` implement Sync?
+**Question**: in which cases does `Arc<T>` implement Sync?
 <!-- pause -->
 
 Answer: `T` must implement `Sync`.
@@ -757,43 +918,43 @@ Answer: `T` must implement `Sync`.
 
 ---
 
-### Combinations
+## Combinations of `Sync` and `Send`
 
 <!-- column_layout: [2, 1] -->
 
 <!-- column: 0 -->
 
-Common combinations
-- `Send + !Sync`: 
-  - Semantics: may be accessed from any thread but only one at a time
-  - Examples
-    - `Cell`
-      - set inner value
-      - swap inner value
-      - copy inner value
-    - `RefCell`
-      - removes compile-time borrow checks
-      - may panic
-- `!Send + !Sync`, 
-  - Semantics: types that manipulate shared handles to `!Sync` types
-  - Examples
-    - `Rc<T>`
-    - Raw pointers
+### `Send + !Sync`: 
+
+Types that may be accessed from any thread but only one at a time
+- `Cell`
+  - set inner value
+  - swap inner value
+  - copy inner value
+- `RefCell`
+  - removes compile-time borrow checks
+  - may panic
+
+### `!Send + !Sync` 
+
+Types that manipulate shared handles to `!Sync` types
+
+- `Rc<T>`
+- Raw pointers
 
 
 <!-- column: 1 -->
 
+### `!Send + Sync`:
 
-Rare combination: `!Send + Sync`:
+Rare combination: may be accessed immutably from any thread and multiple in parallel
 
-Semantics
-- may be accessed immutably from any thread and multiple in parallel
-- mutable access has to happen on the thread it was created on
-- transferring a &mut T to another thread is not possible since it would break the protections that !Send has
-
-Example: `MutexGuard` of a `T` [See](https://users.rust-lang.org/t/example-of-a-type-that-is-not-send/59835/3)
-- cannot be dropped in a different thread, so it is not Send
+Example: `MutexGuard` of a `T`
+- cannot be dropped in a different thread to prevent data races so it is not `Send`
 - If `T` is sync then it follows from `T : Sync ⇔ &'_ T : Sync` that a `MutexGuard<T>` is Sync
+
+
+[See](https://users.rust-lang.org/t/example-of-a-type-that-is-not-send/59835/3)
 
 <!-- reset_layout -->
 
@@ -802,15 +963,10 @@ Example: `MutexGuard` of a `T` [See](https://users.rust-lang.org/t/example-of-a-
 
 ---
 
-
 ## Lifetime bounds
 
 Structs or types can contain references. In that case they receive a lifetime parameter. 
 
-Syntax:
- 
-- Structs: lifetime parameters are written before the generic type arguments. 
-- Functions: lifetime parameters are written before the argument list 
 
 <!-- pause -->
 
@@ -827,10 +983,15 @@ Syntax:
 
 Rules/corollary:
 
-- `&'a T => T: 'a`, since a reference to T of lifetime 'a cannot be valid for 'a if T itself is not valid for 'a
+- `&'a T => T: 'a`, since a reference to `T` of lifetime `'a` cannot be valid for `'a` if `T` itself is not valid for `'a`.
 
 
-<!-- pause -->
+
+
+---
+
+### Questions
+
 
 **Question**: What does `T: 'static` mean?:
 
@@ -842,9 +1003,7 @@ Rules/corollary:
 
 Every type parameter for values that have to be send between (worker) threads has to have the bound `'static`.
 
----
-
-### Questions
+<!-- pause -->
 
 **Question**: What is the difference between `T : 'static` and `&'static T`?
 
@@ -854,24 +1013,6 @@ Every type parameter for values that have to be send between (worker) threads ha
 **Answer**: 
 - `T : 'static` means that `T` must not contain any non-`'static` references.
 - `&'static T` means that this is a reference that lives forever.
-
-
-
-<!-- pause -->
-
-**Question**: What is the difference between `let s = &'static "bla"` and `let s = "bla".to_string()`
-
-<!-- pause -->
-
-**Answer**:
-- `let s = &'static "bla"` is hardcoded in the binary, cannot be declared mutable,  cannot be moved
-- `let s = "bla".to_string()` is allocated on the heap, can be declared mutable
----
-## Lifetime bounds in methods
-
-If you call a method on a struct that accesses a field and put it in a reference, the struct is borrowed for the duration of the reference to the field. 
-
-Solution: create copies instead of borrowing a reference.
 
 ---
 ## Function traits
@@ -903,49 +1044,27 @@ Every function (or every distinct instantiation of a generic function) has its o
 
 Type itself encodes the information of what function will be called. At runtime no function pointers are needed.
 
----
 
-### Size of function items
-
-#### Question
-
-Predict the output of
-
-```rust
-fn my_function(x: i32) -> i32 {
-    x + 1
-}
-
-fn main() {
-    let f = my_function; // f is a function item (ZST)
-    println!("Size of f: {}", std::mem::size_of_val(&f));
-}
-```
-
-#### Answer
-
-```
-0
-```
 
 ---
 ## Function pointers
 
-- Syntax
-    - declared with `fn() -> ()`
-    - not a trait
-      - so not written with a capital letter.
-      - cannot be used as a trait bound
-- Semantics
-  - Points to 
-    - a top-level defined function item
-    - an associated function
-  - cannot capture from the environment
-  - Implements all the following traits Fn, FnMut, and FnOnce
-  - size of a pointer, has to be dereferenced,
-    - might be slower than calling a function item or closure directly,
-    - faster then dyn Fn
-  - Primitive type, not a trait
+Syntax
+- declared with `fn() -> ()`
+- not a trait
+  - so not written with a capital letter.
+  - cannot be used as a trait bound
+
+Semantics
+- Points to 
+  - a top-level defined function item
+  - an associated function
+- cannot capture from the environment
+- Implements all the following traits Fn, FnMut, and FnOnce
+- size of a pointer, has to be dereferenced,
+  - might be slower than calling a function item or closure directly,
+  - faster then dyn Fn
+- Primitive type, not a trait
 
 
 ---
@@ -968,8 +1087,15 @@ When is it particularly useful?
 
 ---
 
-### Size of function pointers
 
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+
+#### Question
+
+Predict the output of
 
 ```rust
 fn my_function(x: i32) -> i32 {
@@ -977,16 +1103,79 @@ fn my_function(x: i32) -> i32 {
 }
 
 fn main() {
-    let f: fn(i32) -> i32 = my_function; // f is a function pointer
-    println!("Size of f: {}", std::mem::size_of_val(&f)); // Output: 8 (on 64-bit)
+    let f = my_function;
+    println!("Size of f: {}", std::mem::size_of_val(&f));
 }
 ```
 
+<!-- pause -->
+
+<!-- column: 1 -->
+
+#### Answer
+
+```
+0
+```
+
+
+
+Why?
+
+<!-- pause -->
+
+Function items are treated as compile-time constants.
+
 ---
 
-https://dtolnay.github.io/rust-quiz/34
 
-#### Question
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+
+### Question
+
+
+What is the output of: 
+
+```rust
+fn my_function(x: i32) -> i32 {
+    x + 1
+}
+
+fn main() {
+    let f: fn(i32) -> i32 = my_function; 
+    println!("Size of f: {}", std::mem::size_of_val(&f)); 
+}
+```
+
+<!-- pause -->
+
+### Answer
+
+```
+8 (64-bit)
+4 (32-bit)
+```
+
+<!-- column: 1 -->
+
+
+Why?
+
+<!-- pause -->
+
+
+Function pointers are stored in a pointer-like form that can be used at run-time.
+
+---
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+### Question
 
 What is the output of?
 
@@ -1009,21 +1198,35 @@ fn main() {
 }
 ```
 
+<!-- column: 1 -->
+
+<!-- pause -->
+
 #### Short answer
 
 ```
 20
 ```
 
+<!-- pause -->
+
 #### Long answer
 
-The first call in main coerces `a::<u8>` from a function to a function pointer (`fn(fn(u8)) {a::<u8>}` to `fn(fn(u8))`) prior to calling d, so its size would be 8 on a system with 64-bit function pointers
-The second call in main does not involve function pointers; d is directly called with T being the inexpressible type of `a::<u8>`, which is zero-sized.
+1. The first call in main coerces `a::<u8>` from a function to a function pointer (`fn(fn(u8)) {a::<u8>}` to `fn(fn(u8))`) prior to calling d, so its size would be 8 on a system with 64-bit function pointers
+2. The second call in main does not involve function pointers; `d` is directly called with `T` being the inexpressible type of `a::<u8>`, which is zero-sized.
+
+
+[See](https://dtolnay.github.io/rust-quiz/34)
 
 ---
 
 ### Function pointer fields
 
+
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
 
 #### Question
 
@@ -1044,16 +1247,22 @@ fn main() {
 }
 ```
 
+<!-- column: 1 -->
+
+<!-- pause -->
+
 #### Short answer
 
 ```
 1
 ```
 
+<!-- pause -->
+
 
 #### Long answer
 
-A call that looks like .f() always resolves to a method, in this case the inherent method S::f. To call the function pointer stored in field f, we would need to write parentheses around the field access: 
+A call that looks like `.f()` always resolves to a method, in this case the inherent method `S::f`. To call the function pointer stored in field `f`, we would need to write parentheses around the field access: 
 
 ```rust
 fn main() {
@@ -1061,22 +1270,31 @@ fn main() {
     (S { f: print2 }.f)();
 }
 ```
+
+(See Tolnay)
+
 ---
+
 ## Closures
 
+A kind of function defined in a certain scope that may capture references to variables in the containing scope
 
-- Alternative names
-  - Lambda
-- Semantics
-  - A function defined in a certain scope that captures reference to variables in the containing scope
-  - Creates an implicit struct to store captured data.
-  - Has an implicit call method defined
-- Syntax
-  - Complete type cannot be written explicitly   
+Non-capturing closures can be converted into function pointers automatically
+
+Closures cannot be `async` but they can return a `Pin<Box<dyn Future>>`.
+
+Closures are also called
+- Lambda-functions
+- Anonymous functions
 
 ---
 
-### Tuples versus grouping
+
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
 
 #### Question
 
@@ -1096,16 +1314,20 @@ fn main() {
     let g = || { () & S(2) };
     let h = || ( {} & S(3) );
     let i = || { {} & S(4) };
-    f();
-    g();
-    h();
-    i();
+    f(); g(); h(); i();
 }
 ```
+
+<!-- column: 1 -->
+
+<!-- pause -->
 
 #### Short Answer
 
 The output will be 123
+
+
+<!-- pause -->
 
 #### Long answer
 
@@ -1121,15 +1343,37 @@ The combination of an inner and outer `{}`, makes the parser interpret the `{}` 
 ---
 ## Closures and lifetimes
 
-Lifetime elision rules are different so the following does not compile 
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+
+Will the following code compile?
 
 ```rust
 fn main() {
-    let closure = |x: &i32| x; // ❌
+    let closure = |x: &i32| x;
 }
 ```
 
-Beause it expands to
+<!-- pause -->
+
+**Answer**: No, because lifetime elision rules are different for closures.
+
+
+```
+  |
+2 |     let closure = |x: &i32| x;
+  |                       -   - ^ returning this value requires that `'1` must outlive `'2`
+  |                       |   |
+  |                       |   return type of closure is &'2 i32
+  |                       let's call the lifetime of this reference `'1`
+```
+
+<!-- column: 1 -->
+
+The closure definition can be expanded to:
 
 ```rust 
 fn main() {
@@ -1145,40 +1389,56 @@ Two distinct lifetimes are created for the input and output type. For normal fun
 
 ## Closure implementations
 
-How are they implemented? https://huonw.github.io/blog/2015/05/finding-closure-in-rust/
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+How are they implemented?
 
 - the body block of the closure is analyzed
-- variables in the body that refer to variables in the surrounding scope are Marked as captured
+- variables in the body that refer to variables in the surrounding scope are marked as captured
 - struct generated at compile time with as fields the references to the captured variables, it serves as the environment for the closure body
   - the struct is invisible and out of reach for the programmer in normal Rust code
-  - This makes closures part of the family of unnameable types (also called Voldemort types)
+  - This makes closures part of the family of unnameable types (also called **Voldemort types**)
+
+Only implement `Copy`, `Clone`,  `Send` and `Sync` when their contents (references or values) do.
+
 
 Disadvantages
 - The exact type of a closure struct cannot be written out to type an input or output argument 
 
-Solution: use a trait object
+<!-- column: 1 -->
+
 
 ```rust
-fn returns_closure() -> Box<dyn Fn(i32) -> i32> {
-    Box::new(|x| x + 1)
+let mut v = vec![];
+
+// nice form
+let closure = || v.push(1);
+
+// explicit form
+struct Environment<'v> {
+    v: &'v mut Vec<i32>
 }
+
+// let's try implementing `Fn`
+impl<'v> Fn() for Environment<'v> {
+    fn call(&self) {
+        self.v.push(1) // error: cannot borrow data mutably
+    }
+}
+let closure = Environment { v: &mut v }
 ```
 
----
+[See](https://huonw.github.io/blog/2015/05/finding-closure-in-rust/)
 
-### Move
-
-You can change the default behaviour to only create references to the surrounding environment. You can also move variables inside the struct representing the environment of the closure. This is done by using the move keyword.
-- takes ownership of variables in the surrounding scope
-- inside the closure the variables are used by reference
-  - does not make the closure FnOnce in itself
 
 ---
 ## Variants of closures
 
 There are different kinds of closures based on the signature of their call method on the underlying struct:
 - Fn:
-    - the signature is call(&self),
+    - the signature is `call(&self)`,
     - the body of the closure only may have
         - immutable references to its containing scope
         - values that were moved from the containing scope (and only use them by reference afterwards)
@@ -1187,31 +1447,63 @@ There are different kinds of closures based on the signature of their call metho
 
 ---
 
-- FnMut:
-    - the signature is (& mut self)
-    - the closure can have
-        - mutable references to its containing scope
-        - immutable references to its containing scope
-    - cannot consume or move out captured variables
-    - can be called more than once, but only once at a time, must implement FnOnce
+### `FnMut`
+
+All closures that may modify captured variables.
+
+- the signature is `call(&mut self)`
+- can have
+    - mutable references to its containing scope
+    - immutable references to its containing scope
+- cannot consume or move out captured variables
+- can be called more than once, but only once at a time, must implement `FnOnce`
+
+```rust
+let mut x = 5;
+{
+    let mut square_x = || x *= x;
+    square_x();
+}
+assert_eq!(x, 25);
+```
 
 ---
 
-- FnOnce
-    - signature is call(self)
-    - can only be called once
-    - Can move variables that are moved in out
-        - Other words:
-            - consume captured variables
-            - apply functions to them and call by value, not by reference
-        - This means that it is not Fn or FnMut, because those should be able to be called multiple times
-    - and mutate,
-    - implemented by every closure
-  - Only implement copy clone send and sync when their contents do
+### `FnOnce`
+
+
+A closure that can be called at most once
+
+- signature is `call(self)`
+- It may mutate captured variables or references
+- May move variables that are moved in out
+  - consume captured variables
+  - apply functions to them and call by value, not by reference
+  
+This means that it is not `Fn` or `FnMut`, because those should be able to be called multiple times
+
+Implemented by every closure (a closure that cannot be called once is not a closure)
+
 
 ---
 
-### Interpretation of the return keyword
+### Move
+
+You can change the default behaviour to only create references to the surrounding environment. You can also move variables inside the struct representing the environment of the closure. This is done by using the `move` keyword.
+- takes ownership of variables in the surrounding scope
+- inside the closure the captured and moved variables are used by reference
+
+**Question**: is every `move` closure `FnOnce`.
+
+<!-- pause -->
+
+**Answer**: No, the captured references are moved inside, but the closure can be called multiple times since the body uses the captured variables by reference.
+
+---
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
 
 #### Question
 
@@ -1238,9 +1530,16 @@ fn main() {
 }
 ```
 
+
+<!-- column: 1 -->
+
+<!-- pause -->
+
 #### Short answer
 
 This will output 2. Why?
+
+<!-- pause -->
 
 #### Long answer
 
@@ -1251,7 +1550,6 @@ This will output 2. Why?
 5. `f` is implemented for `()` to output `2`.
 
 ```rust
-
 fn main() {
     let x = || { return || true; };
     x().f();
@@ -1262,7 +1560,12 @@ Will output 1 since a call to x returns another closure that returns a bool.
 ---
 ### Ranges and FnOnce
 
-https://dtolnay.github.io/rust-quiz/33
+
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
 
 #### Question
 ```rust
@@ -1285,11 +1588,19 @@ impl<F: FnOnce() -> T, T> Trait for F {
         || print!("4")
     }
 }
+```
 
+<!-- column: 1 -->
+
+What does this print?
+
+```rust
 fn main() {
     (|| .. .method())();
 }
 ```
+
+<!-- pause --> 
 
 #### Short answer
 
@@ -1300,28 +1611,116 @@ In this case main would print 24.
 This code is parsed as 
 
 1. `(|| ..).method()`
-2. this an invocation of our impl of Trait on `FnOnce() -> T` where T is inferred to be RangeFull. 
+2. this an invocation of the impl of `Trait` on `FnOnce() -> T` where `T` is inferred to be `RangeFull`. 
+
+[See](https://dtolnay.github.io/rust-quiz/33)
+
 ---
+
 ## Iterators
 
 
-### Into iter vs. iter
 
-#### Question
+<!-- column_layout: [2, 1] -->
 
-What is the difference between `into_iter` and `iter`?
+<!-- column: 0 -->
 
-#### Answer
 
-The iterator returned by into_iter may yield any of T, &T or &mut T, depending on the context.
+```rust
+struct Fibonacci {
+    curr: u32,
+    next: u32,
+}
 
-The iterator returned by iter will yield &T, by convention.
+impl Iterator for Fibonacci {
+    type Item = u32;
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.curr;
+
+        self.curr = self.next;
+        self.next = current + self.next;
+        Some(current)
+    }
+}
+```
+
+<!-- column: 1 -->
+
+Return a Fibonacci sequence generator
+
+```rust
+fn fibonacci() -> Fibonacci {
+    Fibonacci { curr: 0, next: 1 }
+}
+
+fn main() {
+    // `0..3` is an `Iterator` that generates: 0, 1, and 2.
+    let mut sequence = 0..3;
+
+    println!("Four consecutive `next` calls on 0..3");
+    println!("> {:?}", sequence.next());
+    println!("> {:?}", sequence.next());
+    println!("> {:?}", sequence.next());
+    println!("> {:?}", sequence.next());
+```
+
+---
+
+## Into iter vs. iter
+
+Iterators have to be generated from iterable data structures. 
+
+
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+### Creating iterators
+
+There are multiple ways to create iterators.
+
+**Question**: What is the difference between `into_iter` and `iter`?
+
+<!-- pause -->
+
+**Answer**
+- The iterator returned by `into_iter` may yield any of `T`, `&T` or `&mut T`, depending on the context.
+- The iterator returned by iter will yield `&T`.
+<!-- pause -->
+
+### For loops
+
+**Question**: Does a for loop use `into_iter` or `iter`?
+
+<!-- pause -->
+
+**Answer**: `into_iter`
+
+<!-- column: 1 -->
+
+A for loop desugars to:
+
+```rust
+let mut it = values.into_iter();
+loop {
+    match it.next() {
+        Some(x) => println!("{}", x),
+        None => break,
+    }
+}
+```
+
+[See](https://hermanradtke.com/2015/06/22/effectively-using-iterators-in-rust.html/)
 
 ---
 
 ### Lazy map
 
-https://dtolnay.github.io/rust-quiz/26
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
 
 #### Question
 
@@ -1342,18 +1741,30 @@ fn main() {
 }
 ```
 
+<!-- column: 1 -->
+
+<!-- pause -->
 #### Short answer
 ```
 112031
 ```
 
+<!-- pause -->
+
+
 #### Long answer
 
-The closure provided as an argument to map is only invoked as values are consumed from the resulting iterator. The closure is not applied eagerly to the entire input stream up front.---
+The closure provided as an argument to map is only invoked as values are consumed from the resulting iterator. The closure is not applied eagerly to the entire input stream up front.
+
+[See](https://dtolnay.github.io/rust-quiz/26)
 
 ---
 
-## Type elision / erasure
+## Dealing with complex types
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
 
 Sometimes
 - we don't know the type
@@ -1363,14 +1774,18 @@ Sometimes
   - iterator implementors
   - future combinators (see next session)
 
+**Question**: How to deal with such types?
 
-solution:
+<!-- pause -->
+
+**Answer**: Use **type elision**
 - For local variables 
-  - use the wildcard `_`
+  - use the wildcard `_` for generic parameters and let the compiler infer
 - In type declarations for functions, traits or structs, 
   - the type cannot be inferred by the compiler
   - use opaque types
 
+<!-- column: 1 -->
    
 Benefits of opaque types
 - hide specific types,
@@ -1381,41 +1796,113 @@ Benefits of opaque types
 
 ### Trait objects
 
-First type of opaque types is a **trait object**:
+<!-- column_layout: [2, 1] -->
 
-- synonyms
-  - dynamic dispatch
-- syntax
-  - Marked with the dyn keyword
-- semantics
-  - a pointer to an object
-  - a pointer to a method table, called a **vtable** with function pointers for each method of the trait
-- Disadvantages
-  - Cannot be pushed on the stack directly, 
-  - has to be on the heap or behind a pointer on the stack
-  - Method call is determined at runtime, less optimizations
-- How can it be created? Which traits can be used to create trait objects? The ones that are object safe.
-    - cannot have generic methods
-    - The return type isn't Self.
+<!-- column: 0 -->
+
+When don't know the concrete type until runtime, we can replace the concrete type by a trait object and call methods through **dynamic dispatch** (marked with the `dyn` keyword).
+
+```rust
+pub trait Draw {
+    fn draw(&self);
+}
+
+pub struct Screen {
+    pub components: Vec<Box<dyn Draw>>,
+}
+
+impl Screen {
+    pub fn run(&self) {
+        for component in self.components.iter() {
+            component.draw();
+        }
+    }
+}
+```
+
+<!-- column: 1 -->
+
+
+multiple concrete types to fill in for the trait object at runtime `=>` type elision
+
+
+How is it implemented?
+- a pointer to an object
+- a pointer to a method table, called a **vtable** with function pointers for each method of the trait
+
+
+Disadvantages
+- Cannot be pushed on the stack directly, 
+- has to be on the heap or behind a pointer on the stack
+- Method call is determined at runtime, less optimizations
+
+---
+
+### Creating trait objects 
+
+**Question**: Which of the following traits can be used to create a trait object?
+- A trait with methods that have generic parameters
+- A trait with a method that returns Self
+
+<!-- pause -->
+
+**Answer**: neither of them.
+
+
+Traits that can be turned into a trait object are called **object safe**.
+
+> You must be able to call methods of the trait the same way for any instance of the trait
+> properties guarantee that, no matter what, 
+> - the size and shape of the arguments and return value only depend on the bare trait — 
+> - not on the instance (on Self) or any type arguments (which will have been "forgotten" by runtime)
+
+[See](https://www.reddit.com/r/rust/comments/kw8p5v/what_does_it_mean_to_be_an_objectsafe_trait/)
+
+---
+
+
+### DSTs
+
+Trait objects are part of the family of **dynamically sized types** (DST) 
+
+- Their type is unknown until run-time, so their size is unknown until run-time.
+- They cannot be allocated on the stack.
+
+All generic type parameters should have a determined size at compile time by default.
+
+This means that `GenericType<D>` is syntax sugar for `GenericType<D: Sized>` 
+
+If you want to use a DST, you have to use `?Sized` as in `GenericType<D: ?Sized>`.
+  
+**Question**: What are fat pointers? Why are they called fat pointers?
+
+<!-- pause -->
+
+**Answer**: References to DSTs are called **fat pointers.** A fat pointer contains a pointer plus some information that makes the DST "complete":
+- the length
+- a pointer to the method table
+  
+
+[See](https://stackoverflow.com/questions/57754901/what-is-a-fat-pointer)
+
+---
 
 
 ---
 
 ### Dynamic versus static dispatch
 
-#### Question
-What is the output of this Rust program?
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
 ```rust
 trait Base {
-    fn method(&self) {
-        print!("1");
-    }
+    fn method(&self) { print!("1"); }
 }
 
 trait Derived: Base {
-    fn method(&self) {
-        print!("2");
-    }
+    fn method(&self) { print!("2"); }
 }
 
 struct BothTraits;
@@ -1429,49 +1916,145 @@ fn dynamic_dispatch(x: &dyn Base) {
 fn static_dispatch<T: Base>(x: T) {
     x.method();
 }
+```
 
+
+<!-- column: 1 -->
+
+What is the output of
+
+```rust
 fn main() {
     dynamic_dispatch(&BothTraits);
     static_dispatch(BothTraits);
 }
 ```
 
-#### Long answer 
+<!-- pause -->
 
-- Dynamic dispatch: The forwarding is done by reading from a table of function pointers contained within the trait object. Expanded to `<dyn Base as Base>::method`. Since the argument was obtained by converting a BothTraits to dyn Base, the automatically generated implementation detail will wind up forwarding to `<BothTraits as Base>::method` which prints 1.
-- Static dispatch: Type inference within generic functions in Rust happens independently of any concrete instantiation of the generic function i.e. before we know what T may be, other than the fact that it implements Base. By the time that T is decided, it has already been determined that x.method() is calling `<T as Base>::method` or `<BothTraits as Base>::method` which prints 1.
+11
 
 ---
 
-### Lifetimes for trait objects
+#### Long answer 
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+
+- Dynamic dispatch:
+  - convert the argument of type BothTraits to `dyn Base`
+  - Method call can be expanded to `<dyn Base as Base>::method`.
+  - Method from a table of function pointers contained within the trait object. 
+  - print 1.
+- Static dispatch: 
+  - do type inference at compile time
+  - look at the trait bounds of the generic parameter
+  - determine the function to be called
+  - expand the call as `<T as Base>::method` or `<BothTraits as Base>::method` 
+  - concrete instantiation of the generic type parameter
+  - print 1.
+
+```rust
+fn main() {
+    dynamic_dispatch(&BothTraits);
+    static_dispatch(BothTraits);
+}
+```
+
+<!-- column: 1 -->
+
+
+```rust
+trait Base {
+    fn method(&self) { print!("1"); }
+}
+
+trait Derived: Base {
+    fn method(&self) { print!("2"); }
+}
+
+struct BothTraits;
+impl Base for BothTraits {}
+impl Derived for BothTraits {}
+
+fn dynamic_dispatch(x: &dyn Base) {
+    x.method();
+}
+
+fn static_dispatch<T: Base>(x: T) {
+    x.method();
+}
+```
+---
+
+## Lifetimes for trait objects
 
 a trait object's lifetime bound is inferred from context
 
-Examples
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+
+### Box
+
 
 ```rust
 trait Trait {}
+```
 
-// elided
+
+```rust
 type T1 = Box<dyn Trait>;
-// expanded, Box<T> has no lifetime bound on T, so inferred as 'static
+```
+What is the lifetime bound on `dyn Trait`? 
+<!-- pause -->
+```rust
 type T2 = Box<dyn Trait + 'static>;
+```
+`Box<T>` has no lifetime bound on `T`, so inferred as `'static`.
 
-// elided
+<!-- column: 1 -->
+
+<!-- pause -->
+
+### Impl blocks
+
+```rust
 impl dyn Trait {}
-// expanded
+```
+What is the lifetime bound on `dyn Trait`?
+
+<!-- pause -->
+```rust
 impl dyn Trait + 'static {}
+```
 
-// elided
+### References
+
+```rust
 type T3<'a> = &'a dyn Trait;
-// expanded, &'a T requires T: 'a, so inferred as 'a
+```
+<!-- pause -->
+
+`&'a T` requires `T: 'a`, so inferred as `'a`
+
+```rust
 type T4<'a> = &'a (dyn Trait + 'a);
-
-
 ```
 
 
 ---
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+
+
+`Ref` wraps a borrowed reference to a value in a RefCell box.
 
 ```rust
 use std::cell::Ref;
@@ -1481,6 +2064,13 @@ type T5<'a> = Ref<'a, dyn Trait>;
 // expanded, Ref<'a, T> requires T: 'a, so inferred as 'a
 type T6<'a> = Ref<'a, dyn Trait + 'a>;
 
+
+```
+
+<!-- column: 1 -->
+
+
+```rust
 trait GenericTrait<'a>: 'a {}
 
 // elided
@@ -1494,73 +2084,170 @@ impl<'a> dyn GenericTrait<'a> {}
 impl<'a> dyn GenericTrait<'a> + 'a {}
 ```
 
-https://github.com/pretzelhammer/rust-blog/blob/master/posts/common-rust-lifetime-misconceptions.md#6-boxed-trait-objects-dont-have-lifetimes
-
----
-
-### DSTs
-
-Trait objects are part of the family of dynamically sized types (DST) 
-
-Synonyms
-- unsized types
-Syntax
-- `GenericType<D: ?Sized>`
-Semantics
-- Types that don't fit on the stack as local variables by value
+[See](https://github.com/pretzelhammer/rust-blog/blob/master/posts/common-rust-lifetime-misconceptions.md#6-boxed-trait-objects-dont-have-lifetimes)
 
 
 
 ---
 
-### Examples of DSTs
+### `Impl Trait`
 
-Examples
-- slices: fat pointer has address and length  
-  - str
-- trait objects:
-  - dyn Trait
+The other type of opaque types or type elision.
 
-Related concepts:
-- References to DSTs are called **fat pointers.** https://stackoverflow.com/questions/57754901/what-is-a-fat-pointer
+Syntax sugar for hardcoding a specific type that can be inferred by the compiler
 
-Counterexamples? Most types are not DSTs because their size is known at compile time.
-- They implement the trait Sized
-- DSTs don't implement Sized
-
-
----
-
-### Impl trait
-
-The other type of opaque types is impl Trait.
+Benefits:
+- No extra heap allocation
+- No dynamic dispatch overhead
 
 Synonyms
 - anonymous types
 
-syntax
-- written `impl Trait` 
-- syntax sugar for hardcoding a specific type that can be inferred by the compiler
-semantics
-- No extra heap allocation
-- No dynamic dispatch overhead
+---
 
-Implementation:
-- "return position impl Trait" (RPIT) in Trait definitions (allowed since dec 2023)
-  - the anonymous type in the impl T return type is a kind of associated type
+### Basic example
+
+```rust
+fn parse_csv_document<R: std::io::BufRead>(src: R) -> std::io::Result<Vec<Vec<String>>> {
+    src.lines()
+        .map(|line| {
+            // For each line in the source
+            line.map(|line| {
+                // If the line was read successfully, process it, if not, return the error
+                line.split(',') // Split the line separated by commas
+                    .map(|entry| String::from(entry.trim())) // Remove leading and trailing whitespace
+                    .collect() // Collect all strings in a row into a Vec<String>
+            })
+        })
+        .collect() // Collect all lines into a Vec<Vec<String>>
+}
+```
+
+---
+
+### `impl` in arguments
+
+```rust
+fn parse_csv_document<R: std::io::BufRead>(src: R) -> std::io::Result<Vec<Vec<String>>> {
+    src.lines()
+        .map(|line| {
+            // For each line in the source
+            line.map(|line| {
+                // If the line was read successfully, process it, if not, return the error
+                line.split(',') // Split the line separated by commas
+                    .map(|entry| String::from(entry.trim())) // Remove leading and trailing whitespace
+                    .collect() // Collect all strings in a row into a Vec<String>
+            })
+        })
+        .collect() // Collect all lines into a Vec<Vec<String>>
+}
+```
+
+[See](https://doc.rust-lang.org/rust-by-example/trait/impl_trait.html)
+
+---
+
+### `impl` in return type
+
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+```rust
+use std::iter;
+use std::vec::IntoIter;
+
+// This function combines two `Vec<i32>` and returns an iterator over it.
+// Look how complicated its return type is!
+fn combine_vecs_explicit_return_type(
+    v: Vec<i32>,
+    u: Vec<i32>,
+) -> iter::Cycle<iter::Chain<IntoIter<i32>, IntoIter<i32>>> {
+    v.into_iter().chain(u.into_iter()).cycle()
+}
+```
+
+<!-- pause -->
+
+```rust
+// This is the exact same function, but its return type uses `impl Trait`.
+// Look how much simpler it is!
+fn combine_vecs(
+    v: Vec<i32>,
+    u: Vec<i32>,
+) -> impl Iterator<Item=i32> {
+    v.into_iter().chain(u.into_iter()).cycle()
+}
+```
+
+<!-- column: 1 -->
+
+```rust
+fn main() {
+    let v1 = vec![1, 2, 3];
+    let v2 = vec![4, 5];
+    let mut v3 = combine_vecs(v1, v2);
+    assert_eq!(Some(1), v3.next());
+    assert_eq!(Some(2), v3.next());
+    assert_eq!(Some(3), v3.next());
+    assert_eq!(Some(4), v3.next());
+    assert_eq!(Some(5), v3.next());
+    println!("all done");
+}
+```
+[See](https://doc.rust-lang.org/rust-by-example/trait/impl_trait.html)
 
 ---
 
 #### `impl` everywhere
 
-There is an effort underway to make `impl` type elision possible everywhere
+1. Signatures of methods in traits can use `impl Trait`, also known as "return position impl Trait" (RPIT) 
+   - Implemented using a kind of associated types [See](https://blog.rust-lang.org/2023/12/21/async-fn-rpit-in-traits.html)
+2. Type aliases can use `impl Trait`: `type I = impl Iterator<Item = u32>`. 
+3. Traits with associated types can use `impl Trait` as bounds for the associated type (in nightly Rust)
+4. In local variable bindings `let x: impl Future = foo()` (planned) 
 
-TODO
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+```rust
+trait Container {
+    fn items(&self) -> impl Iterator<Item = Widget>;
+}
+
+impl Container for MyContainer {
+    fn items(&self) -> impl Iterator<Item = Widget> {
+        self.items.iter().cloned()
+    }
+}
+```
+
+<!-- column: 1 -->
+
+```rust
+struct SubsetWrapper<'a> {
+    everything: &'a HashMap<usize, i32>,
+    subset_ids: &'a [usize],
+}
+
+impl<'a> IntoIterator for &SubsetWrapper<'a> {
+    type Item = &'a i32;
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.subset_ids
+            .iter()
+            .map(|id| self.everything.get(id).unwrap())
+    }
+}
+```
+
+[See](https://rust-lang.github.io/impl-trait-initiative/)
 
 ---
 ## New lifetime capture rules
-
-- new lifetime capturing rules for return position impl traits
 
 
 Rust 2021: the following compiles because `impl` does not capture `s`
@@ -1572,7 +2259,9 @@ fn indices<'s, T>(
 }
 ```
 
-I Rust 2024: `impl` will capture lifetime parameter `'s`.
+<!-- pause -->
+
+Rust 2024: `impl` will capture lifetime parameter `'s`.
 ```rust
 fn main() {
     let mut data = vec![1, 2, 3];
@@ -1582,13 +2271,22 @@ fn main() {
 }
 ```
 
+New default = the hidden types for a return-position impl Trait can use any generic parameter in scope.
+
 ---
 
-- use bound": `impl Trait + use<'x, T>`, for example, would indicate that 
-  - the hidden type is allowed to use `'x` and `T`
-  - but not any other generic parameters in scope
+## New syntax
 
-To exempt from lifetime parameter capture, use 
+
+<!-- column_layout: [2, 1] -->
+
+<!-- column: 0 -->
+
+Introduction of **use bound** `impl Trait + use<'x, T>`: 
+  - the hidden type is allowed to use `'x` and `T`
+  - but no other generic parameters in scope
+
+To exempt from lifetime parameter capture, use `use<>`
 
 ```rust
 fn indices<'s, T>(
@@ -1600,14 +2298,25 @@ fn indices<'s, T>(
 }
 ```
 
-Advantages
+<!-- column: 1 -->
 
-- explicit capturing of specific or none of the lifetimes in the arguments
-- consequences: 
-  - implementation can be changed 
-  - but signature does not have to be changed
+Advantage: fine control over capturing of lifetimes in the arguments
 
 
+[See](https://blog.rust-lang.org/2024/09/05/impl-trait-capture-rules.html)
+
+---
 
 
-See  https://blog.rust-lang.org/2024/09/05/impl-trait-capture-rules.html
+### Summary
+
+- Trait bounds
+- Closures
+- Dynamic dispatch
+- Impl traits
+
+---
+
+### Questions?
+
+This presentation was made using [`presenterm`](https://github.com/mfontanini/presenterm).
