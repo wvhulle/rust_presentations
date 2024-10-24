@@ -817,6 +817,12 @@ Overriding methods won't work. This rule is to keep code predictable. Traits can
 
 <!-- column: 0 -->
 
+**Question**: How do you use super-traits?
+
+<!-- pause -->
+
+### Repeated trait bounds
+
 The first place were super-traits can be useful is when we have different `impl` blocks that have the same set of trait bounds in `where` blocks.
 
 1. Analyze what these repeated trait bounds actually mean.
@@ -841,6 +847,7 @@ For example, if we have a super-trait defined as
 ```rust
 trait SuperTrait {
     type State;
+    type SuperState;
 
     ....
 }
@@ -852,23 +859,34 @@ Then we can specify a sub-trait that extends (implements) all `SuperTrait` for w
 trait SubTrait: SuperTrait<State: Sync> {}
 ```
 
+Note that it is not necessary to specify bounds on **all the associated types**.
+
 ---
 
-### Weird stuff
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
+## Weird stuff
 
 ### Introducing new associated types
 
-You can go also introduce a new associated type in `SubTrait`. Then you can refer to this new associated type in the `SuperTrait`.
+Let assume we still have the super-trait
+
+```rust
+trait SuperTrait {
+    type State;
+    type SuperState;
+}
+```
+
+We can introduce a new associated type in `SubTrait`. Then you can refer to this new associated type in the `SuperTrait`.
 
 ```rust
 trait SubTrait: SuperTrait<State=Self::SubState> {
     type SubState
 }
 ```
+
+Note that we don't have to specify all the associated types of the super-trait. 
+
+### Invalid bounds
 
 However, this won't work:
 
@@ -882,38 +900,14 @@ trait SubTrait: SuperTrait<State: Self::SubState> {
 }
 ```
 
-<!-- pause -->
+You cannot use a new associated type as a trait bound for an associated type in a super trait.
 
-<!-- column: 1 -->
-
-### Life-times
-
-You might be in the position that the associated type of the super-trait has a lifetime parameter.
-
-This won't work:
-
-```rust
-trait SuperTrait {
-    type State<'a>;
-}
-
-trait SubTrait: SuperTrait<State: Sync> { }
-```
-
-You need to declare a lifetime:
-
-```rust
-trait SuperTrait {
-    type State<'a>;
-}
-
-trait SubTrait: for<'a> SuperTrait<State<'a>: Sync> { }
-``` 
-(Notice how the `for<'a>` appears in front of the supertrait.)
 
 ---
 
 ## What are some common trait bounds?
+
+<!-- pause -->
 
 <!-- column_layout: [1, 1] -->
 
@@ -927,7 +921,7 @@ What does `Send` for a type mean in practice?
 - It's ownership can be transferred to other thread
 - The other thread becomes responsible for dropping object
 
-Also applies to async tasks since they use **worker threads**.
+Also applies to types sent to async tasks since they might have to go to **worker threads**.
 
 Structs without references are `Send`.
 
@@ -948,7 +942,7 @@ How can we derive if something is `Sync`? There are some rules:
 - References are in one-to-one corresponds with references that point to references (`&T <=> &&T`). This implies that `T : Sync <=> &T : Sync`.
 - A consequence of this is that if `T: !Sync` then `&T: !Sync`
 
-The most common example is a shared immutable reference `Arc` which can be shared accross threads.
+The most common example of a `Sync` type is a shared immutable reference `Arc` which can be shared accross threads.
 
 The single-threaded `Rc` is not `Sync` since it doeesn't use atomic variables underneath, but has lower overhead.
 
@@ -1003,14 +997,18 @@ Types that may be accessed from any thread but only one at a time
 
 `Cell` and `RefCell` are  both not `Sync` because they have **interior mutability**. This means you can modify the value inside with only an immutable reference. This would be a data race if you could do it from several threads in parallel, so it is not `Sync`. 
 
-They are `Send` if their inner type is `Send` they can be transferred safely.
+They are `Send` if their inner type is `Send`.
 
 ### `!Send + !Sync` 
 
 Types that manipulate shared handles to `!Sync` types
 
-- `Rc<T>` since it would be a data race to access them from different threads in parallel. This rules out both `Send` and `Sync`, since both of them would allow immutable access from other threads, and that other thread could use that to call `.clone()` remotely and obtain an `Rc<T>` on the other thread.
-- Raw pointers (I don't know anything about this.)
+`Rc<T>`
+
+- **not** `Send`: since you would be able to clone and then send it to a different thread. This would mean two different `Rc<T>` pointing to `T` from two different threads. `Rc<T>` is not built for that.
+- **not** `Sync`: because `Rc<T>` is not `Send`, so `&T` is not `Send` and we know from before that `T : Sync <=> &T : Sync`.
+
+Raw pointers (I don't know anything about this.)
 
 <!-- column: 1 -->
 
@@ -1019,8 +1017,8 @@ Types that manipulate shared handles to `!Sync` types
 Rare combination: may be accessed immutably from any thread and multiple in parallel
 
 Example: `MutexGuard` of a `T`
-- cannot be dropped in a different thread to prevent data races so it is not `Send`
-- If `T` is sync then it follows from `T : Sync ⇔ &'_ T : Sync` that a `MutexGuard<T>` is Sync
+- cannot be dropped in a different thread to prevent data races so it is not `Send`.
+- If `T` is `Sync` then it follows from `T : Sync <=> &T : Sync` and from the fact that we can obtain a reference `&T` from `MutexGuard<T>`  that a `MutexGuard<T>` is `Sync`.
 
 
 [See](https://users.rust-lang.org/t/example-of-a-type-that-is-not-send/59835/3)
@@ -1032,132 +1030,664 @@ Example: `MutexGuard` of a `T`
 
 ---
 
-## Lifetime bounds
+## What about lifetime bounds?
 
-Structs or types can contain references. In that case they receive a lifetime parameter. 
+<!-- column_layout: [1, 1] -->
 
+<!-- column: 0 -->
+
+We have seen trait bounds on type parameters.
+
+It is also possible to have **lifetime bounds**.
+
+### The basics
+
+Life-times are used for static analysis.
+
+You might already know: A reference `&'a T` has a life-time `'a` if it will be valid for the duration of `'a`. 
+
+See [nomicon](https://doc.rust-lang.org/nomicon/lifetimes.html)
+
+### Lifetime bounds on type parameters
+
+The statement `T: 'a` means that all references in `T` are valid for `'a`. So we know that `&'a T => T: 'a`.
+
+**Question**: For which lifetimes `'a` can you move a `T: 'a`?
 
 <!-- pause -->
 
-**Question**: What does `T: 'a` mean?
+**Answer**: The bound is just a constraint on the life-times inside `T`, so you just have to make sure the life-time of references inside `T` are guaranteed.
+
+A special kind of references are static references such as `&'static T`.  are references that remain **valid until the end** of the program.
+
+
+<!-- column: 1 -->
+
+### The special life-time `'static`
+
+If `T` does not contain any non-`'static` references, then `T` receives a default lifetime bound `T: 'static`. `'static` is a reserved name for a lifetime. 
+
+
+There are two possibilities:
+- Either `T` does not contain any references and is an **owned variable**.
+- `T` only contains references that remain valid for the rest of the program.
+
+Where will you encounter `T: 'static`?
 
 <!-- pause -->
 
-**Answer**: You can hold on `T` 
-- for the lifetime `'a` 
-- until you move it out
-
-
-<!-- pause -->
-
-Rules/corollary:
-
-- `&'a T => T: 'a`, since a reference to `T` of lifetime `'a` cannot be valid for `'a` if `T` itself is not valid for `'a`.
+- Some container types assume that `T: 'static` such as `Box<T>`.
+- Types that are sent between threads or tasks have to be `T: 'static`.
 
 ---
 
-### Questions
+## Life-times in traits
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+You can declare lifetime parameters for traits.
+
+Most commonly for `struct`s that take lifetime parameters:
+
+```rust
+trait BorrowedData<'a> {
+    fn get_data(&self) -> &'a str;
+}
+```
+
+Let's say we have some struct that contains a reference:
+
+```rust
+struct DataHolder<'b> {
+    data: &'b str,
+}
+```
+
+We can implement the trait for the struct?:
+
+```rust
+impl<'a> BorrowedData<'a> for DataHolder<'a> {
+    fn get_data(&self) -> &'a str {
+        self.data
+    }
+}
+```
+
+<!-- column: 1 -->
+
+### Associated types in super-traits
+
+A trait may specify an associated type that depends on a life-time.
+
+```rust
+trait SuperTrait {
+    type State<'a>;
+}
+```
+
+Every `impl` block will need to provided a type parametrised by life-time `'a`.
 
 
-**Question**: What does `T: 'static` mean?:
+When you want to add bounds you might try:
 
-<!-- pause -->
+```rust
+trait SubTrait: SuperTrait<State: Sync> { }
+```
 
-**Answer**:
-- `T` does not contain any lifetimes
-- `T` is an owned variable
+But this won't work. You need to declare a lifetime:
 
-Every type parameter for values that have to be send between (worker) threads has to have the bound `'static`.
-
-<!-- pause -->
-
-**Question**: What is the difference between `T : 'static` and `&'static T`?
-
-
-<!-- pause -->
-
-**Answer**: 
-- `T : 'static` means that `T` must not contain any non-`'static` references.
-- `&'static T` means that this is a reference that lives forever.
+```rust
+trait SubTrait: for<'a> SuperTrait<State<'a>: Sync> { }
+``` 
+(Notice how the `for<'a>` appears in front of the supertrait.)
 
 ---
+
+## Function types
+
+Things that **produce values**.
+
+### Traditional function types
+
+Rust has a few function-like things:
+- Function items
+- Function pointers
+- Closures
+
+**Question**: Which other things produce values?
+
+<!-- pause -->
+
+
+### Extended function types
+
+To be complete, there are also things with `call`-like functionality such as
+- iterators
+- co-routines
+- futures
+- async iterators
+
+You might be interested in effects: ways to model styles of computation. An effect is an additional “kind” in the formal, type system sense of the word, like a life-time.
+
+See the programming languages: 
+
+- [Koka](https://koka-lang.github.io/koka/doc/index.html)
+- [Effekt](https://effekt-lang.org/)
+
+---
+
 ## Function traits
 
-Semantics:
-- Fn: functions that can be called infinitely and may reference variables
-- FnMut: functions that may reference mutable variables
-- FnOnce: functions that can only be called once and may move or drop variables
+Let's focus on Rust.
 
-Rules:
-- `Fn => FnMut => FnOnce`
+Function items, pointers and closures can be categorized **using the trait system** of Rust.
+
+Function items and function pointers satisfy all these traits, but closures form a ladder:
+
+1. `Fn`: closures that do not capture mutable references and may be called infinitely
+2. `FnMut`: closures that may reference mutable variables
+3. `FnOnce`: closures that can only be called once and may move or drop variables
+
+The relationship between them is `Fn => FnMut => FnOnce`.
+
 ---
+
 ## Function items
 
-- syntax
-  - created with `fn foo() {}`
-  - `fn(u32) -> i32 {fn_name}` in error messages
-- semantics
-  - stateless, pure
-   - can be transferred to other threads since there is no risk of data races
-  - references to immutable code in compiled binary
-    - can easily be cloned or copied  
-    - can be optimized away `=>` no pointer needed `=>` zero sized
-  - have unique unnameable types
-  - implement all the function traits
+Named function declarations that implement all function traits `Fn, FnMut, FnOnce`. 
 
-Every function (or every distinct instantiation of a generic function) has its own unique type. Even if they have the same signature.
-- `fn(u32) -> i32 {fn_name}` in error messages
+May be on top-level or nested as **helper functions**.
 
-Type itself encodes the information of what function will be called. At runtime no function pointers are needed.
+```rust
+fn foo<T>() { }
+```
+
+Or they an appear as methods in traits.
+
+
+```rust
+trait MyTrait {
+    fn do_something(&self);
+}
+
+struct MyStruct;
+
+impl MyTrait for MyStruct {
+    fn do_something(&self) {
+        println!("Doing something!");
+    }
+}
+```
+
+In this position they may take the special parameter `self`.
+
+
+
+---
+
+## Lifetime elision in free functions
+
+When function item arguments or return types have reference types, **lifetime annotations have to be added**.
+
+But in some cases they can be omitted. The rules that describe this are called **lifetime elisision rules**.
+
+If there is exactly **one input lifetime position** (elided or not), that lifetime is assigned to all elided output lifetimes.
+
+
+```rust
+fn print(s: &str);                                      // elided
+fn print<'a>(s: &'a str);                               // expanded
+
+fn debug(lvl: usize, s: &str);                          // elided
+fn debug<'a>(lvl: usize, s: &'a str);                   // expanded
+
+fn substr(s: &str, until: usize) -> &str;               // elided
+fn substr<'a>(s: &'a str, until: usize) -> &'a str;     // expanded
+
+fn get_str() -> &str;                                   // ILLEGAL
+
+fn frob(s: &str, t: &str) -> &str;                      // ILLEGAL
+```
+
+---
+
+## Lifetime elision in methods
+
+If there are multiple input lifetime positions, but one of them is &self or &mut self, the lifetime of self is assigned to all elided output lifetimes.
+
+
+```rust
+fn get_mut(&mut self) -> &mut T;                        // elided
+fn get_mut<'a>(&'a mut self) -> &'a mut T;              // expanded
+
+fn args<T: ToCStr>(&mut self, args: &[T]) -> &mut Command                  // elided
+fn args<'a, 'b, T: ToCStr>(&'a mut self, args: &'b [T]) -> &'a mut Command // expanded
+```
+
+
+---
+
+## Implementation function items
+
+They become part of immutable code in the compiled binary.
+- can easily be cloned or copied  
+- can be optimized away `=>` no pointer needed `=>` zero-sized
+
+
+The signature of function items:
+- has to be declared in advance.
+- afterwards, you can't really refer to it. (I do not not know the details.)
+  
+The compiler will reference to them using `fn(u32) -> i32 {fn_name}`.
+
+Every distinct instantiation of a generic function item with different type parameters has its **own unique type** because the type itself **encodes the information of which body will be called**.
+
+```rust
+let x = &mut foo::<i32>;
+*x = foo::<u32>; //~ ERROR mismatched types
+```
+
+**Question**: What is the solution?
+
+<!-- pause -->
+
+**Answer**: Cast them as function pointers (see in a few slides).
+
+Recursion in function items is possible but discouraged.
+
+---
+
+## Closures
+
+---
+
+## Closures
+
+
+### What are closures?
+
+|                        | **Function items** | **Closures** |
+|------------------------|----------------|----------|
+| _Anonymous_ | No | Yes |
+| _Capture_                | No             | Optional |
+| _Recursive_              | Optional       | No       |
+| _Signature_              | Required       | Optional |
+| _`Fn` and `FnMut` trait_ | Yes            | Optional |
+| _`FnOnce` trait_         | Yes            | Yes      |
+
+Because they can be anonymous closures are useful for **functional programming**.
+
+Functional programming languages require functions as **first-class citizens**.
+
+We have to be able to pass them around anonymously, which is why they are also called **anonymous functions**.
+
+In lambda-calculus closures are written using a lambda, they are also called **lambda-functions**
+
+For example:
+
+```
+(λx. x + 1) 5 
+```
+
+A foundation for formal verification of programming languages. 
+
+See [Plato Stanford](https://plato.stanford.edu/entries/lambda-calculus/)
+
+---
+
+## Closures
+
+### Async closures
+
+In this presentation
+
+On Rust stable, closures cannot be `async`. You need to do a heap allocation of a **trait object** (see further): `Pin<Box<dyn Future>>`.
+
+On Rust nightly, closures can be `async` with `#![feature(async_closure)]`.
+
+```rust
+// Instead of writing:
+fn doesnt_exactly_take_an_async_closure<F, Fut>(callback: F)
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = String>
+{ todo!() }
+
+// Write this:
+fn takes_an_async_closure<F: async FnOnce() -> String>(callback: F) { todo!() }
+// Or this:
+fn takes_an_async_closure<F: AsyncFnOnce() -> String>(callback: F) 
+```
+
+
+[See](https://blog.rust-lang.org/inside-rust/2024/08/09/async-closures-call-for-testing.html)
+
+---
+
+## Closures and lifetimes
+
+Will the following code compile?
+
+```rust
+fn main() {
+    let closure = |x: &i32| x;
+}
+```
+
+<!-- pause -->
+
+**Answer**: No, because lifetime elision rules are different for closures compared to function items.
+
+
+```
+  |
+2 |     let closure = |x: &i32| x;
+  |                       -   - ^ returning this value requires that `'1` must outlive `'2`
+  |                       |   |
+  |                       |   return type of closure is &'2 i32
+  |                       let's call the lifetime of this reference `'1`
+```
+
+The closure definition can be expanded to:
+
+```rust 
+fn main() {
+    let closure = for<'a, 'b> |x: &'a i32| -> &'b i32 { x };
+}
+```
+
+Two distinct lifetimes are created for the input and output type. For normal functions, only one lifetime is created.
+
+
+See [Pretzelhammer](https://github.com/pretzelhammer/rust-blog/blob/master/posts/common-rust-lifetime-misconceptions.md#10-closures-follow-the-same-lifetime-elision-rules-as-functions)
+
+---
+
+## Closure implementations
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+The implementation of closures is taken for granted in most languages. Rust is more low-level and it is important to know how they work under the hood.
+
+The **body block of the closure is analyzed**: 
+1. variables in the body that refer to variables in the surrounding scope are marked as captured
+2. struct generated at compile time with as fields the references to the captured variables, it serves as the environment for the closure body
+  - the struct is invisible and out of reach for the programmer in normal Rust code
+  
+### Types of closures
+
+- the direct type of a closure is implicit and cannot be used directly
+- so closures are called **unnameable types** (also called **Voldemort types**)
+
+[See](https://huonw.github.io/blog/2015/05/finding-closure-in-rust/)
+
+<!-- column: 1 -->
+
+### Rough model
+
+A simple closure may be roughly modeled as follows:
+
+```rust
+let mut v = vec![];
+let closure = || v.push(1);
+
+struct Environment<'v> {
+    v: &'v mut Vec<i32>
+}
+
+impl<'v> Fn() for Environment<'v> {
+    fn call(&self) {
+        self.v.push(1) // error: cannot borrow data mutably
+    }
+}
+let closure = Environment { v: &mut v }
+```
+
+
+
+### Marker traits on closures:
+
+- just like structs, closures may implement `Copy`, `Clone`,  `Send` and `Sync`
+- they only implement marker traits when captured content does.
+
+
+---
+## Variants of closures
+
+
+### `FnOnce`
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+
+The least a closure should be able to do is be called once.
+
+How is a closure that can be called once implemented?
+
+Let's modify the rough model a bit. 
+
+```rust
+let v = vec![];
+let closure = || v.push(1);
+
+struct Environment {
+    v: Vec<i32>
+}
+
+impl FnOnce() for Environment {
+    fn call(self) {
+        self.v.push(1)
+    }
+}
+let closure = Environment { v }
+```
+
+Notice that the environment takes ownership of the local variable `v`. 
+
+<!-- column: 1 -->
+
+Notice that the signature of `call` is written as `call(self)` which means that it's type is `Environment -> ()`.
+
+The body of the call function:
+- may mutate captured variables or references
+- May move variables that are moved in, back out
+  - consume captured variables and drop them
+  - apply functions to them and call by value, not by reference
+
+---
+
+### Move
+
+In practice, closures cannot just consume their environment. 
+
+You need to explicitly mark closures as **consuming** their environment with a keyword `move`.
+- takes ownership of variables in the surrounding scope
+- inside the closure the captured and moved variables are used by reference
+
+
+```rust
+let data = vec![1, 2, 3];
+let closure = move || println!("captured {data:?} by value");
+```
+
+
+**Question**: is every `move` closure `FnOnce`.
+
+<!-- pause -->
+
+**Answer**: No, the captured references are moved inside, but the closure can be called multiple times since the body uses the captured variables by reference.
+
+---
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+#### Question
+
+```rust
+trait Trait {
+    fn f(&self);
+}
+
+impl<F: FnOnce() -> bool> Trait for F {
+    fn f(&self) {
+        print!("1");
+    }
+}
+
+impl Trait for () {
+    fn f(&self) {
+        print!("2");
+    }
+}
+
+fn main() {
+    let x = || { (return) || true; };
+    x().f();
+}
+```
+
+
+<!-- column: 1 -->
+
+<!-- pause -->
+
+#### Short answer
+
+This will output 2. Why?
+
+<!-- pause -->
+
+#### Long answer
+
+1. We define a closure x `|| { (return) || true; }`
+2. `(return)` is of type `!` because it never completes
+3. `(return) || true` is of type `! || true` which evaluates to `bool || true`
+4. `bool || true;` evaluates to `()`
+5. `f` is implemented for `()` to output `2`.
+
+```rust
+fn main() {
+    let x = || { return || true; };
+    x().f();
+}
+```
+Will output 1 since a call to x returns another closure that returns a bool.
+
+
+```rust
+struct Environment<'v> {
+    v: &'v mut Vec<i32>
+}
+
+impl<'v> Fn() for Environment<'v> {
+    fn call(&mut self) {
+        self.v.push(1)
+    }
+}
+```
+
+### Closures that are `FnMut`
+
+The signature is `call(&mut self)`
+
+- can have
+    - mutable references to its containing scope (but importantly, does **not need to**)
+    - immutable references to its containing scope
+- cannot consume or move out captured variables
+- can be called more than once, but only once at a time, so it must implement `FnOnce`
+
+```rust
+let mut x = 5;
+{
+    let mut square_x = || x *= x;
+    square_x();
+}
+assert_eq!(x, 25);
+```
+
+---
+
+### `Fn` function trait
+
+We modify the signature of the `call` method slightly.
+
+```rust
+struct Environment<'v> {
+    v: &'v mut Vec<i32>
+}
+
+impl<'v> Fn() for Environment<'v> {
+    fn call(&self) {
+        self.v.push(1) // error: cannot borrow data mutably
+    }
+}
+```
+
+The signature is `call(&self)`.
+
+Properties of `Fn` closures
+- the body may only have
+    - immutable references to its containing scope
+    - values that were moved from the containing scope (and only use them by reference afterwards)
+- can be called from anywhere, multiple times
+- Must implement `FnMut`
 
 
 
 ---
 ## Function pointers
 
-Syntax
-- declared with `fn() -> ()`
-- not a trait
-  - so not written with a capital letter.
-  - cannot be used as a trait bound
+<!-- column_layout: [1, 1] -->
 
-Semantics
-- Points to 
-  - a top-level defined function item
-  - an associated function
-- cannot capture from the environment
-- Implements all the following traits Fn, FnMut, and FnOnce
-- size of a pointer, has to be dereferenced,
-  - might be slower than calling a function item or closure directly,
-  - faster then dyn Fn
-- Primitive type, not a trait
+<!-- column: 0 -->
 
+Not necessarily named functions that implement `Fn, FnMut, FnOnce`
+
+A function pointer is a type declared with `fn() -> ()`. 
+
+### Construction
+
+The first way to create a function pointer is by **casting a function item**:
+
+```rust
+fn foo<T>() { }
+let x: fn() -> () = foo::<i32> as fn();
+
+```
+
+The second way is by casting a non-capturing closure.
+
+```rust
+let x: fn() -> () = || {};
+```
+
+<!-- column: 1 -->
+
+Important: 
+- it is **not a trait** `=>` cannot be used as a trait bound.
+- cannot capture from the environment like a closure
+
+
+Implementation: it has the size of a pointer, so it has to be dereferenced:
+- might be slower than calling a function item or closure directly
+- faster then `dyn Fn`
 
 ---
 
-### How to create function pointers
-
-
-- How can it be created?
-    - non-capturing closures
-    - function items with the same signature
-- How can it be used?
-  - Can be passed as argument to
-    - function items
-    - other function pointers
-  - Can be returned from a function item
-
-
-When is it particularly useful?
-- When using FFI with languages that don't support closures
-
----
+### Guess the size (part 1)
 
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
-
 
 #### Question
 
@@ -1176,7 +1706,6 @@ fn main() {
 
 <!-- pause -->
 
-<!-- column: 1 -->
 
 #### Answer
 
@@ -1184,23 +1713,17 @@ fn main() {
 0
 ```
 
-
-
 Why?
 
 <!-- pause -->
 
-Function items are treated as compile-time constants.
-
----
+Function items **do not have a run-time cost**, so they do **not require memory allocation**.
 
 
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
+<!-- column: 1 -->
 
 
-### Question
+### Guess (part 2)
 
 
 What is the output of: 
@@ -1225,15 +1748,40 @@ fn main() {
 4 (32-bit)
 ```
 
-<!-- column: 1 -->
-
-
-Why?
-
-<!-- pause -->
 
 
 Function pointers are stored in a pointer-like form that can be used at run-time.
+
+---
+
+### Lifetime notation of function pointers
+
+```rust
+struct S {
+    function_pointer: for<'a> fn(arg: &'a i32) -> &'a i32
+}
+```
+
+---
+
+### What to do with function pointers?
+
+Can be passed as argument to other functions or returned.
+
+Can be an **associated item** of a trait
+
+```rust
+pub trait IntoStateMachine
+{
+    ...
+    const ON_TRANSITION: fn(&mut Self, &Self::State, &Self::State) = |_, _, _| {};
+}
+```
+
+Beware that you cannot use `impl` in the signature. So async functions can only be written as function pointers if you transform them in normal function pointers that allocate on the heap.
+
+Particularly useful when working with languages that don't support closures like C.
+
 
 ---
 
@@ -1339,289 +1887,6 @@ fn main() {
 
 (See Tolnay)
 
----
-
-## Closures
-
-A kind of function defined in a certain scope that may capture references to variables in the containing scope
-
-Non-capturing closures can be converted into function pointers automatically
-
-Closures cannot be `async` but they can return a `Pin<Box<dyn Future>>`.
-
-Closures are also called
-- Lambda-functions
-- Anonymous functions
-
----
-
-
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-
-#### Question
-
-```rust
-struct S(i32);
-
-impl std::ops::BitAnd<S> for () {
-    type Output = ();
-
-    fn bitand(self, rhs: S) {
-        print!("{}", rhs.0);
-    }
-}
-
-fn main() {
-    let f = || ( () & S(1) );
-    let g = || { () & S(2) };
-    let h = || ( {} & S(3) );
-    let i = || { {} & S(4) };
-    f(); g(); h(); i();
-}
-```
-
-<!-- column: 1 -->
-
-<!-- pause -->
-
-#### Short Answer
-
-The output will be 123
-
-
-<!-- pause -->
-
-#### Long answer
-
-```rust
-let i = || {
-    {}
-    &S(4)
-};
-```
-The combination of an inner and outer `{}`, makes the parser interpret the `{}` as an empty block statement followed by & as a reference. 
-
-
----
-## Closures and lifetimes
-
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-
-Will the following code compile?
-
-```rust
-fn main() {
-    let closure = |x: &i32| x;
-}
-```
-
-<!-- pause -->
-
-**Answer**: No, because lifetime elision rules are different for closures.
-
-
-```
-  |
-2 |     let closure = |x: &i32| x;
-  |                       -   - ^ returning this value requires that `'1` must outlive `'2`
-  |                       |   |
-  |                       |   return type of closure is &'2 i32
-  |                       let's call the lifetime of this reference `'1`
-```
-
-<!-- column: 1 -->
-
-The closure definition can be expanded to:
-
-```rust 
-fn main() {
-    // input and output each get their own distinct lifetimes
-    let closure = for<'a, 'b> |x: &'a i32| -> &'b i32 { x };
-    // note: the above line is not valid syntax, but we need it for illustrative purposes
-}
-```
-
-Two distinct lifetimes are created for the input and output type. For normal functions, only one lifetime is created.
-
----
-
-## Closure implementations
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-How are they implemented?
-
-- the body block of the closure is analyzed
-- variables in the body that refer to variables in the surrounding scope are marked as captured
-- struct generated at compile time with as fields the references to the captured variables, it serves as the environment for the closure body
-  - the struct is invisible and out of reach for the programmer in normal Rust code
-  - This makes closures part of the family of unnameable types (also called **Voldemort types**)
-
-Only implement `Copy`, `Clone`,  `Send` and `Sync` when their contents (references or values) do.
-
-
-Disadvantages
-- The exact type of a closure struct cannot be written out to type an input or output argument 
-
-<!-- column: 1 -->
-
-
-```rust
-let mut v = vec![];
-
-// nice form
-let closure = || v.push(1);
-
-// explicit form
-struct Environment<'v> {
-    v: &'v mut Vec<i32>
-}
-
-// let's try implementing `Fn`
-impl<'v> Fn() for Environment<'v> {
-    fn call(&self) {
-        self.v.push(1) // error: cannot borrow data mutably
-    }
-}
-let closure = Environment { v: &mut v }
-```
-
-[See](https://huonw.github.io/blog/2015/05/finding-closure-in-rust/)
-
-
----
-## Variants of closures
-
-There are different kinds of closures based on the signature of their call method on the underlying struct:
-- Fn:
-    - the signature is `call(&self)`,
-    - the body of the closure only may have
-        - immutable references to its containing scope
-        - values that were moved from the containing scope (and only use them by reference afterwards)
-    - can be called from anywhere, multiple times
-    - Must implement FnMut
-
----
-
-### `FnMut`
-
-All closures that may modify captured variables.
-
-- the signature is `call(&mut self)`
-- can have
-    - mutable references to its containing scope
-    - immutable references to its containing scope
-- cannot consume or move out captured variables
-- can be called more than once, but only once at a time, must implement `FnOnce`
-
-```rust
-let mut x = 5;
-{
-    let mut square_x = || x *= x;
-    square_x();
-}
-assert_eq!(x, 25);
-```
-
----
-
-### `FnOnce`
-
-
-A closure that can be called at most once
-
-- signature is `call(self)`
-- It may mutate captured variables or references
-- May move variables that are moved in out
-  - consume captured variables
-  - apply functions to them and call by value, not by reference
-  
-This means that it is not `Fn` or `FnMut`, because those should be able to be called multiple times
-
-Implemented by every closure (a closure that cannot be called once is not a closure)
-
-
----
-
-### Move
-
-You can change the default behaviour to only create references to the surrounding environment. You can also move variables inside the struct representing the environment of the closure. This is done by using the `move` keyword.
-- takes ownership of variables in the surrounding scope
-- inside the closure the captured and moved variables are used by reference
-
-**Question**: is every `move` closure `FnOnce`.
-
-<!-- pause -->
-
-**Answer**: No, the captured references are moved inside, but the closure can be called multiple times since the body uses the captured variables by reference.
-
----
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-#### Question
-
-```rust
-trait Trait {
-    fn f(&self);
-}
-
-impl<F: FnOnce() -> bool> Trait for F {
-    fn f(&self) {
-        print!("1");
-    }
-}
-
-impl Trait for () {
-    fn f(&self) {
-        print!("2");
-    }
-}
-
-fn main() {
-    let x = || { (return) || true; };
-    x().f();
-}
-```
-
-
-<!-- column: 1 -->
-
-<!-- pause -->
-
-#### Short answer
-
-This will output 2. Why?
-
-<!-- pause -->
-
-#### Long answer
-
-1. We define a closure x `|| { (return) || true; }`
-2. `(return)` is of type `!` because it never completes
-3. `(return) || true` is of type `! || true` which evaluates to `bool || true`
-4. `bool || true;` evaluates to `()`
-5. `f` is implemented for `()` to output `2`.
-
-```rust
-fn main() {
-    let x = || { return || true; };
-    x().f();
-}
-```
-Will output 1 since a call to x returns another closure that returns a bool.
 
 ---
 ### Ranges and FnOnce
