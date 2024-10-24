@@ -1535,22 +1535,26 @@ It is difficult to come up with non-artificial examples of non-trivial life-time
 <!-- column: 0 -->
 
 
-We start at the bottom of the ladder with the least powerful closure.
+We start at the bottom of the ladder with the type of closures that can **do the most** but are also the **least widely applicable**.
+
+**Question**: What trait is associated with this type of closures?
+
+<!-- pause -->
 
 ### The base case `FnOnce`
 
-
 The least a closure should be able to do is be called once = the **base case**.
 
-
-Imagine the following closure 
+Imagine the following closure:
 
 ```rust
 let mut v = vec![];
 let closure = move || v.push(1);
 ```
 
-What does this compile to?
+**Question**: What does this compile to?
+
+<!-- pause -->
 
 ```rust
 struct Environment {
@@ -1600,17 +1604,21 @@ let closure = move || println!("captured {data:?} by value");
 ```
 
 
-**Question**: is every `move` closure `FnOnce`.
+**Question**: is every `move` closure `FnOnce`?
 
 <!-- pause -->
 
-**Answer**: No, the captured references are moved inside, but the closure can be called multiple times since the body uses the captured variables by reference.
+**Answer**: No, 
+- if a closure captures something by reference the reference is moved inside the implicit struct. Afterwards the call function of the struct can  be called multiple times and the body uses the captured variables by reference. The reference stays in between executions. 
+- If a closure captures something by value, the body of the call function will use it by reference. If you move it, then the closure becomes `FnOnce`.
 
 ---
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
+
+Extremely hard.
 
 #### Question
 
@@ -1646,13 +1654,15 @@ fn main() {
 
 This will output 2. Why?
 
+Hint: did you hear about the never type `!`?
+
 <!-- pause -->
 
 #### Long answer
 
 1. We define a closure x `|| { (return) || true; }`
-2. `(return)` is of type `!` because it never completes
-3. `(return) || true` is of type `! || true` which evaluates to `bool || true`
+2. `(return)` is the application of a tuple constructor function that has output type `!` because it returns before the tuple is constructed
+3. This implies that `(return) || true` is of type `! || true` which evaluates to `bool || true`
 4. `bool || true;` evaluates to `()`
 5. `f` is implemented for `()` to output `2`.
 
@@ -1664,6 +1674,28 @@ fn main() {
 ```
 Will output 1 since a call to x returns another closure that returns a bool.
 
+
+---
+
+### Closures that are `FnMut`
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+A basic example is:
+
+
+```rust
+let mut x = 5;
+{
+    let mut square_x = || x *= x;
+    square_x();
+}
+assert_eq!(x, 25);
+```
+
+This compiles to
 
 ```rust
 struct Environment<'v> {
@@ -1677,9 +1709,8 @@ impl<'v> Fn() for Environment<'v> {
 }
 ```
 
----
+<!-- column: 0 -->
 
-### Closures that are `FnMut`
 
 The signature of the `call` method on the implicit struct is `call(&mut self)`.
 
@@ -1687,15 +1718,6 @@ The struct may have
 - mutable references to its containing scope (but importantly, does **not need to**)
 - immutable references to its containing scope
 
-
-```rust
-let mut x = 5;
-{
-    let mut square_x = || x *= x;
-    square_x();
-}
-assert_eq!(x, 25);
-```
 
 Compared to `FnOnce`, a `FnMut` closure:
 - cannot consume or move out captured variables
@@ -1706,6 +1728,8 @@ Compared to `FnOnce`, a `FnMut` closure:
 ---
 
 ### `Fn` function trait
+
+The **least capable** but also the **most widely useful** closures are those with the `Fn` trait.
 
 We modify the signature of the `call` method slightly.
 
@@ -1730,8 +1754,6 @@ Properties of `Fn` closures
 - can be called from anywhere, multiple times
 - Must implement `FnMut`
 
-
-
 ---
 ## Function pointers
 
@@ -1739,9 +1761,16 @@ Properties of `Fn` closures
 
 <!-- column: 0 -->
 
-Not necessarily named functions that implement `Fn, FnMut, FnOnce`
+A type of functions that do not have to be named and implement all traits `Fn, FnMut, FnOnce`. 
 
-A function pointer is a type declared with `fn() -> ()`. 
+This makes them somewhat of a mix between 
+
+- weak closures and 
+- references to function items
+
+They are a kind of **pointers to free function items**. 
+
+The **type of a function pointer** is denoted with `fn() -> ()`. 
 
 ### Construction
 
@@ -1750,7 +1779,6 @@ The first way to create a function pointer is by **casting a function item**:
 ```rust
 fn foo<T>() { }
 let x: fn() -> () = foo::<i32> as fn();
-
 ```
 
 The second way is by casting a non-capturing closure.
@@ -1765,7 +1793,6 @@ Important:
 - it is **not a trait** `=>` cannot be used as a trait bound.
 - cannot capture from the environment like a closure
 
-
 Implementation: it has the size of a pointer, so it has to be dereferenced:
 - might be slower than calling a function item or closure directly
 - faster then trait objects of function traits,`dyn Fn` (see later for more information about trait objects)
@@ -1779,7 +1806,7 @@ Implementation: it has the size of a pointer, so it has to be dereferenced:
 
 <!-- column: 0 -->
 
-#### Question
+### Question
 
 Predict the output of
 
@@ -1797,7 +1824,7 @@ fn main() {
 <!-- pause -->
 
 
-#### Answer
+### Short Answer
 
 ```
 0
@@ -1807,7 +1834,7 @@ Why?
 
 <!-- pause -->
 
-Function items **do not have a run-time cost**, so they do **not require memory allocation**.
+**Answer**: In this case `f` is a function item. Function items **do not have a run-time cost**, so they do **not require memory allocation**.
 
 
 <!-- column: 1 -->
@@ -1831,34 +1858,29 @@ fn main() {
 
 <!-- pause -->
 
-### Answer
+### Short Answer
 
 ```
 8 (64-bit)
 4 (32-bit)
 ```
 
+<!-- pause -->
 
+### Long answer
 
-Function pointers are stored in a pointer-like form that can be used at run-time.
-
----
-
-### Lifetime notation of function pointers
-
-```rust
-struct S {
-    function_pointer: for<'a> fn(arg: &'a i32) -> &'a i32
-}
-```
+**Answer**: The function item `my_function` is casted as a function pointer because of the type declaration of `f`. Function pointers are stored in a pointer-like form which allows them to be pass around at run-time. Every pointer is the size of a CPU register.
 
 ---
+
 
 ### What to do with function pointers?
 
 Can be passed as argument to other functions or returned.
 
 Can be an **associated item** of a trait
+
+An example from the `statig` library:
 
 ```rust
 pub trait IntoStateMachine
@@ -1868,7 +1890,7 @@ pub trait IntoStateMachine
 }
 ```
 
-Beware that you cannot use `impl` in the signature. So async functions can only be written as function pointers if you transform them in normal function pointers that allocate on the heap.
+Beware that you cannot use `impl` in the signature. So async functions can only be written as function pointers if you transform them in normal function pointers that allocate a trait object (see further) of a future on the heap.
 
 Particularly useful when working with languages that don't support closures like C.
 
@@ -1926,8 +1948,6 @@ fn main() {
 
 ### Function pointer fields
 
-
-
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
@@ -1979,6 +1999,21 @@ fn main() {
 
 ---
 
+### Lifetime notation of function pointers
+
+The declaration of lifetime parameters is a bit different for function pointer types.
+
+You need to declare them before the `fn` keyword with a `for<'a>` expression.
+
+```rust
+struct S {
+    function_pointer: for<'a> fn(arg: &'a i32) -> &'a i32
+}
+```
+
+This is similar to the way you declare a super trait that depends on a life-time parameter.
+
+---
 
 ## How should we handle complex types?
 
@@ -1998,26 +2033,35 @@ Sometimes
 
 <!-- pause -->
 
-**Answer**: Use **type elision**
-- For local variables 
-  - use the wildcard `_` for generic parameters and let the compiler infer
-- In type declarations for functions, traits or structs, 
-  - the type cannot be inferred by the compiler
-  - use opaque types
+**Answer**: Use **type elision**.
+
+1. Total type elision for for local variables: use the wildcard `_` for generic parameters and let the compiler infer
+2. Use partial type elision in type declarations for functions, traits or structs and only declare trait bounds with **opaque types**
+   1. Compile time concrete type inference: `impl Trait` (in the following slides)
+   2. Run-time trait bound checking: `&dyn Trait` (later)
+
+I won't cover total type elision or `_`-wildcards here. They are only useful in the simplest cases.
 
 <!-- column: 1 -->
-   
-Benefits of opaque types
-- hide specific types,
-- cleaner API
-- underlying concrete type can be an unnameable type
-   
----
 
+### Partial type elisision
+
+The benefits of opaque types:
+- hide internals of underlying types
+- support a wider variety of types (whole families of traits)
+- underlying types can have an unnameable type (for example closures, async functions)
+
+All in all, opaque types improve code usability. 
+
+They should be used as much as possible where appropriate.
+
+---
 
 ### `impl Trait`
 
-The other type of opaque types or type elision.
+The first kind of opaque type.
+
+When we know the underlying can be determined at compile time we use `impl Trait`. 
 
 Syntax sugar for hardcoding a specific type that can be inferred by the compiler
 
@@ -2031,6 +2075,8 @@ Synonyms
 ---
 
 ## Basic example
+
+(Taken from the Rust documentation)
 
 ```rust
 fn parse_csv_document<R: std::io::BufRead>(src: R) -> std::io::Result<Vec<Vec<String>>> {
@@ -2126,7 +2172,13 @@ fn main() {
 
 ---
 
+# Unstable `impl` stuff
+
+---
+
 ## The  `impl` everywhere project
+
+A project goal on the Rust roadmap.
 
 1. Signatures of methods in traits can use `impl Trait`, also known as "return position impl Trait" (RPIT) 
    - Implemented using a kind of associated types [See](https://blog.rust-lang.org/2023/12/21/async-fn-rpit-in-traits.html)
@@ -2134,10 +2186,9 @@ fn main() {
 3. Traits with associated types can use `impl Trait` as bounds for the associated type (in nightly Rust)
 4. In local variable bindings `let x: impl Future = foo()` (planned) 
 
-
-
 [See](https://rust-lang.github.io/impl-trait-initiative/)
 
+In the following slides I will give a short overview of the most recent features available in the nightly compiler.
 
 ---
 
@@ -2208,6 +2259,9 @@ fn indices<'s, T>(
 <!-- pause -->
 
 Rust 2024: `impl` will capture lifetime parameter `'s`.
+
+This used to compile but now it doesn't anymore for consistency reasons:
+
 ```rust
 fn main() {
     let mut data = vec![1, 2, 3];
@@ -2217,12 +2271,11 @@ fn main() {
 }
 ```
 
-New default = the hidden types for a return-position impl Trait can use any generic parameter in scope.
+New default = the hidden types for a return-position `impl Trait` can use any generic parameter in scope.
 
 ---
 
 ## New syntax
-
 
 <!-- column_layout: [1, 1] -->
 
@@ -2251,10 +2304,22 @@ Advantage: fine control over capturing of lifetimes in the arguments
 
 [See](https://blog.rust-lang.org/2024/09/05/impl-trait-capture-rules.html)
 
+---
+
+## `impl` on local variables
+
+`#![feature(impl_trait_in_bindings)]`
+
+
+```rust
+fn main() {
+    let x: impl Trait = foo;
+}
+```
 
 ---
 
-## Impl on type aliases
+## `impl` on type aliases
 
 ```rust
 mod odd {
@@ -2413,6 +2478,8 @@ Code near trait objects should be able to deal with the methods of the trait and
 
 ## Creating trait objects 
 
+### Quiz
+
 **Question**: Which of the following traits can be used to create a trait object?
 - A trait that is `Sized`
 - A trait that is `Clone`
@@ -2423,19 +2490,17 @@ Code near trait objects should be able to deal with the methods of the trait and
 
 <!-- pause -->
 
-### Object safe traits
+### Definition of object safe
 
 There are rules that say which traits are **object safe** and can be turned into traits.
 
-> You must be able to call methods of the trait the same way for any instance of the trait
-> properties guarantee that, no matter what, 
-> - the size and shape of the arguments and return value only depend on the bare trait — 
-> - not on the instance (on Self) or any type arguments (which will have been "forgotten" by runtime)
+You must be able to call methods of the trait the same way for any instance of the trait.
+
+The properties of the trait should be such that  
+- the size and shape of the arguments and return value only depend on the bare trait
+- they dont depend on the instance (on `Self`) or any type arguments (which will have been "forgotten" by runtime)
 
 [See](https://www.reddit.com/r/rust/comments/kw8p5v/what_does_it_mean_to_be_an_objectsafe_trait/)
-
----
-
 
 
 ---
@@ -2486,34 +2551,11 @@ fn main() {
 
 ---
 
-#### Long answer 
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
 
-
-- Dynamic dispatch:
-  - convert the argument of type BothTraits to `dyn Base`
-  - Method call can be expanded to `<dyn Base as Base>::method`.
-  - Method from a table of function pointers contained within the trait object. 
-  - print 1.
-- Static dispatch: 
-  - do type inference at compile time
-  - look at the trait bounds of the generic parameter
-  - determine the function to be called
-  - expand the call as `<T as Base>::method` or `<BothTraits as Base>::method` 
-  - concrete instantiation of the generic type parameter
-  - print 1.
-
-```rust
-fn main() {
-    dynamic_dispatch(&BothTraits);
-    static_dispatch(BothTraits);
-}
-```
-
-<!-- column: 1 -->
 
 
 ```rust
@@ -2537,6 +2579,36 @@ fn static_dispatch<T: Base>(x: T) {
     x.method();
 }
 ```
+
+
+```rust
+fn main() {
+    dynamic_dispatch(&BothTraits);
+    static_dispatch(BothTraits);
+}
+```
+
+<!-- column: 1 -->
+
+#### Long answer 
+
+
+- Dynamic dispatch:
+  - convert the argument of type BothTraits to `dyn Base`
+  - Method call can be expanded to `<dyn Base as Base>::method`.
+  - Method from a table of function pointers contained within the trait object. 
+  - print 1.
+- Static dispatch: 
+  - do type inference at compile time
+  - look at the trait bounds of the generic parameter
+  - determine the function to be called
+  - expand the call as `<T as Base>::method` or `<BothTraits as Base>::method` 
+  - concrete instantiation of the generic type parameter
+  - print 1.
+
+
+Summary: method resolution on both trait objects and generic types **passes through the trait bounds**.
+
 ---
 
 ## Lifetimes for trait objects
@@ -2544,18 +2616,18 @@ fn static_dispatch<T: Base>(x: T) {
 a trait object's lifetime bound is inferred from context
 
 <!-- column_layout: [1, 1] -->
-
 <!-- column: 0 -->
 
 
-### Box
+### Inside a `Box`
 
+Let's assume we have some trait:
 
 ```rust
 trait Trait {}
 ```
 
-
+We define a Box containing a trait object.
 ```rust
 type T1 = Box<dyn Trait>;
 ```
@@ -2568,9 +2640,8 @@ type T2 = Box<dyn Trait + 'static>;
 
 <!-- column: 1 -->
 
-<!-- pause -->
 
-### Impl blocks
+### Inside `impl` blocks
 
 ```rust
 impl dyn Trait {}
@@ -2582,7 +2653,7 @@ What is the lifetime bound on `dyn Trait`?
 impl dyn Trait + 'static {}
 ```
 
-### References
+### References to trait objects
 
 ```rust
 type T3<'a> = &'a dyn Trait;
@@ -2602,22 +2673,32 @@ type T4<'a> = &'a (dyn Trait + 'a);
 
 <!-- column: 0 -->
 
+### Borrowed references
 
-
-`Ref` wraps a borrowed reference to a value in a RefCell box.
+`Ref` wraps a borrowed reference to a value in a `RefCell` box.
 
 ```rust
 use std::cell::Ref;
 
 // elided
 type T5<'a> = Ref<'a, dyn Trait>;
-// expanded, Ref<'a, T> requires T: 'a, so inferred as 'a
+```
+
+What does this expand to?
+
+<!-- pause -->
+
+`Ref<'a, T>` requires `T: 'a`, so inferred as `'a`
+
+```rust
 type T6<'a> = Ref<'a, dyn Trait + 'a>;
-
-
 ```
 
 <!-- column: 1 -->
+
+### Traits with life-times
+
+Some more examples:
 
 
 ```rust
@@ -2670,7 +2751,7 @@ All these ways to produce values can be seen as **effects**: modes of computatio
 
 Different effects introduce duplication. For example, there are similar traits: `AsyncRead` vs `Read`.
 
-One proposal is
+One proposal is to add derive macros that signify things that have a similar implementation with different effects. 
 
 ```rust
 #[maybe(async)]
@@ -2685,12 +2766,24 @@ impl File {
 }
 ```
 
-See the blog post about Rust written by [Yoshua](https://blog.yoshuawuyts.com/extending-rusts-effect-system/)
+Personally, I don't like this proposal.
+
+See the blog post about Rust written by [Yoshua Wuyts](https://blog.yoshuawuyts.com/extending-rusts-effect-system/)
 
 <!-- column: 1 -->
 
+The Rust syntax proposal is quite ugly compared to Koka.
 
-The Rust syntax proposal is quite ugly compared to Koka
+In Koka, there are **algebraic effect handlers**. 
+
+For example, there are several built-in effect handlers: 
+- `total` means a function that terminates on all inputs.
+- `div` is for functions that never terminate.
+- `exn` is for functions that panic or throw.
+
+<!-- pause -->
+
+The following functions all compute the square of an integer.
 
 ```koka
 fun square1( x : int ) : total int   { x*x }
@@ -2700,23 +2793,37 @@ fun square4( x : int ) : exn int     { throw( "oops" ); x*x }
 ```
 
 See:
-
 - [Koka](https://koka-lang.github.io/koka/doc/index.html)
 - [Effekt](https://effekt-lang.org/)
 
-Let's focus on Rust.
 
 ---
 
-## Creating simple iterators
+## The basics of iterators
 
-An iterator is the simplest kind of effect. It's side-effect is **advancing some internal state** incrementally.
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+### Looking ahead to coroutines
+
+An iterator is not really an effect, but it could be viewed as a special case of co-routines. 
+
+Co-routines (as seen later) are effects. Coroutines introduce the concept of yielding.
+
+An iterator is a special case of a coroutine that yields new values each time it is called.
 
 Iterators are a useful intermediate data structure that are **easy to reason about** and handle.
 
-In most languages iterators are written with the `yield` keyword. Rust goes for an approach with traits and introduces `next`.
+Use them **as much as you can**.
 
-### Rust
+How do you start using them?
+- In most languages the bodies of iterators are written with the `yield` keyword.
+- Rust goes for an approach with traits and introduces `next`.
+
+<!-- column: 1 -->
+
+### Common iterators in Rust
 
 There are a few built-in constructors for iterators
 
@@ -2737,7 +2844,6 @@ assert_eq!(iter.next(), Some(&['u', 's'][..]));
 assert_eq!(iter.next(), Some(&['s', 't'][..]));
 assert_eq!(iter.next(), None);
 ```
-
 
 ---
 
@@ -2851,6 +2957,8 @@ This code is parsed as
 
 <!-- column: 0 -->
 
+How does a custom iterator look?
+
 ```rust
 struct Grid {
     x_coords: Vec<u32>,
@@ -2884,6 +2992,8 @@ impl Iterator for GridIter {
 
 <!-- column: 1 -->
 
+How do we instantiate a new iterator over a grid?
+
 ```rust
 impl IntoIterator for Grid {
     type Item = (u32, u32);
@@ -2892,7 +3002,6 @@ impl IntoIterator for Grid {
         GridIter { grid: self, i: 0, j: 0 }
     }
 }
-
 
 fn main() {
     let grid = Grid { x_coords: vec![3, 5, 7, 9], y_coords: vec![10, 20, 30, 40] };
@@ -2909,8 +3018,6 @@ See [Google](https://google.github.io/comprehensive-rust/iterators/intoiterator.
 ## Into iter vs. iter
 
 Iterators have to be generated from iterable data structures. 
-
-
 
 <!-- column_layout: [1, 1] -->
 
@@ -2939,7 +3046,7 @@ There are multiple ways to create iterators.
 
 <!-- column: 1 -->
 
-A `for x in it` where `it: IntoIterator` desugars to:
+This implies that an expression `for x in it` where `it: IntoIterator` desugars to:
 
 ```rust
 let mut it = values.into_iter();
@@ -3071,9 +3178,9 @@ The question mark propagates the inner `None` to an outer `None`.
 
 ## The fallibility effect 
 
-The question mark operator introduces a new way to change the execution flow of programs.
+The question mark operator `?` introduces a new way to change the execution flow of programs.
 
-It is a kind of **effect** since it adds something new to the way we compute.
+It is a kind of **effect** since it adds something new to the **way we compute** or execute our programs, similar to coroutines.
 
 In other languages, fallibility is not as safe in Rust and you have to explicitly **catch throws**.
 
