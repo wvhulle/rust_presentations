@@ -14,12 +14,18 @@ options:
 
 Mix of information and quizes (from Tolnay) about:
 
-1. Traits
-2. Trait bounds
-3. Supertraits
-4. Trait objects
-5. Traits and closures
-6. Type elision (`impl Trait`)
+- Traits
+- Generics
+- Super-traits
+- Common trait bounds
+- Life-time bounds
+- Function traits
+- Function items
+- Closures
+- Impl trait
+- Trait objects
+- Iterators
+- Fallible computations
 
 
 Who is already familiar with these topics?
@@ -1210,23 +1216,24 @@ Rust has a few function-like things:
 - Function pointers
 - Closures
 
+### What else?
+
+At the end of the presentation we will see other magical things that can produce values...
 
 ---
 
 ## Function traits
 
-
-
 Function items, pointers and closures can be categorized **using the trait system** of Rust.
 
-Function items and function pointers **satisfy all these traits**, but closures form a ladder:
 
 1. `Fn`: closures that do not capture mutable references and may be called infinitely
 2. `FnMut`: closures that may reference mutable variables
 3. `FnOnce`: closures that can only be called once and may move or drop variables
 
-The relationship between them is `Fn => FnMut => FnOnce`.
+Function items and function pointers **satisfy all these traits**.
 
+Closures form a ladder: `Fn => FnMut => FnOnce`. Closures will be discussed after function items.
 
 ---
 
@@ -1242,9 +1249,11 @@ May be on top-level or nested as **helper functions**.
 fn foo<T>() { }
 ```
 
+Methods are preferred over free functions.
+
 ### Methods
 
-Or they appear as methods in traits.
+Methods defined in `impl` blocks of traits on concrete types also become function items.
 
 
 ```rust
@@ -1261,9 +1270,11 @@ impl MyTrait for MyStruct {
 }
 ```
 
-In this position they may take the special parameter `self`.
+The keyword `self` can be of any type derived from the type `Self`.
 
+Methods group related functions together and allow us to chain them. 
 
+**Chaining methods** improves visibility compared to function composition of free functions.
 
 ---
 
@@ -1295,7 +1306,7 @@ fn frob(s: &str, t: &str) -> &str;                      // ILLEGAL
 
 ## Lifetime elision in methods
 
-If there are multiple input lifetime positions, but one of them is &self or &mut self, the lifetime of self is assigned to all elided output lifetimes.
+If there are multiple input lifetime positions, but one of them is `&self` or `&mut self`, the lifetime of the reference to `self` is assigned implicitly to all elided output lifetimes.
 
 
 ```rust
@@ -1329,7 +1340,7 @@ let x = &mut foo::<i32>;
 *x = foo::<u32>; //~ ERROR mismatched types
 ```
 
-**Question**: What is the solution?
+**Question**: How can we assign function items with compatible signatures?
 
 <!-- pause -->
 
@@ -1485,23 +1496,49 @@ impl<'v> Fn() for Environment<'v> {
 let closure = Environment { v: &mut v }
 ```
 
-### Marker traits 
-
-Because closures are just `Environment` structs, they behave like structs:
-- They implement marker traits when captured content does: `Sync`, `Send`, `Copy`, `Clone`.
-- They may capture data that contains references, so they can have lifetime bounds.
 
 For details about the construction, see [Finding closure in Rust](https://huonw.github.io/blog/2015/05/finding-closure-in-rust/)
+
+
+Because closures are just `Environment` structs, they behave like structs.
+
+
+---
+
+## Bounds on closure structs
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+### Auto-trait bounds
+
+Closures implement marker traits when captured content does: `Sync`, `Send`, `Copy`, `Clone`.
+
+### Lifetime bounds
+
+Closure may capture data that contains references, so they can have lifetime bounds.
+
+Closures that are sent between async tasks have to be `'static`.
+
+It is difficult to come up with non-artificial examples of non-trivial life-time bounds on closures.
+
+**Question**: Who has an example?
+
 
 ---
 
 ## Variants of closures
 
-### The base case `FnOnce`
-
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
+
+
+We start at the bottom of the ladder with the least powerful closure.
+
+### The base case `FnOnce`
+
 
 The least a closure should be able to do is be called once = the **base case**.
 
@@ -1640,15 +1677,16 @@ impl<'v> Fn() for Environment<'v> {
 }
 ```
 
+---
+
 ### Closures that are `FnMut`
 
-The signature is `call(&mut self)`
+The signature of the `call` method on the implicit struct is `call(&mut self)`.
 
-- can have
-    - mutable references to its containing scope (but importantly, does **not need to**)
-    - immutable references to its containing scope
-- cannot consume or move out captured variables
-- can be called more than once, but only once at a time, so it must implement `FnOnce`
+The struct may have
+- mutable references to its containing scope (but importantly, does **not need to**)
+- immutable references to its containing scope
+
 
 ```rust
 let mut x = 5;
@@ -1658,6 +1696,12 @@ let mut x = 5;
 }
 assert_eq!(x, 25);
 ```
+
+Compared to `FnOnce`, a `FnMut` closure:
+- cannot consume or move out captured variables
+- can be called more than once for sure, so it must implement `FnOnce`
+- can only be called once at a time, 
+
 
 ---
 
@@ -1724,7 +1768,7 @@ Important:
 
 Implementation: it has the size of a pointer, so it has to be dereferenced:
 - might be slower than calling a function item or closure directly
-- faster then `dyn Fn`
+- faster then trait objects of function traits,`dyn Fn` (see later for more information about trait objects)
 
 ---
 
@@ -2230,14 +2274,13 @@ mod odd {
 
 <!-- column: 0 -->
 
-Every type system has its limits. 
+Every type system has **its limits**. 
 
-There is only so much you can now at compile-time.
+There is only so much you can know **at compile-time**.
 
 The solution to this problem is **trait objects**.
 
 These are a way to handle things that satisfy some trait but we don't know anything else about them.
-
 
 
 ```rust
@@ -2278,9 +2321,65 @@ In addition, Rust marks all trait objects as `!Sized`.
 
 **Answer**: The`!Sized` means a trait object is not stored on the stack, but on the heap.
 
-### Dispatch of methods
+The standard way to deal with `T: !Sized` in function signatures is to 
+- use a reference type such as `&T` or `&mut T` 
+- or a heap-allocated indirection such as `Box` (then you get a reference through `as_ref()`, but I think this is done automatically).
 
-Additionally there is some overhead when we call methods on trait objects. 
+So in practice when dealing with trait objects, you have to type your related functions with `&dyn Trait` to keep them as general as possible.
+
+---
+
+## Intermezzo: What else is `!Sized`?
+
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+Trait objects are part of the family of **dynamically sized types** (DST) 
+
+- Their type is unknown until run-time or varies greatly, so their size is assumed to be unknown until run-time.
+- They cannot be allocated on the stack.
+
+Every type parameter `D` in a generic type `GenericType<D>` receives the bound `D: Sized` by default. So, in general, we cannot pass trait object types as type parameters. 
+
+If you want to include DSTs as possible type parameters, you have to use `?Sized` as in `GenericType<D: ?Sized>`.
+
+<!-- column: 1 -->
+
+### Examples of unsized types
+
+**Question**: Give a few examples of unsized (`!Sized`) types that are not trait objects.
+
+<!-- pause -->
+
+**Answer**: Slices that are not behind a reference such as `str` or `[T]`.
+
+### Fat pointers
+
+All DSTs have something in common. They are called **fat pointers**.
+  
+**Question**: What are fat pointers? Why are they called fat pointers?
+
+<!-- pause -->
+
+**Answer**: A fat pointer contains a pointer plus some information that makes the DST "complete":
+- the length
+- a pointer to the method table
+  
+
+[See](https://stackoverflow.com/questions/57754901/what-is-a-fat-pointer)
+
+
+---
+
+## Dispatch of methods
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+Additionally, there is some overhead when we call methods on trait objects. 
 
 For all the `struct`s or types that implement the trait in the trait object, the compiler has to create a separate table (called a **vtable**) with a map 
 
@@ -2288,14 +2387,17 @@ For all the `struct`s or types that implement the trait in the trait object, the
 method name -> function pointer
 ```
 
+The table may be quite large and increase the size of the compiled binary. 
+
 Each trait object stores a pointer to the right table at run-time.
 
-- The table may be quite large and increase the size of the compiled binary. 
-- Going from the value to the vtable and then to a function pointer adds a certain amount of time.
-- Method calls are indirect and cannot be optimized by the compiler 
+Going from the value to the vtable and then to a function pointer **adds a certain amount of time**.
 
-The lookup of methods in this table is called **dynamic dispatch**
+The lookup of methods through the pointer to the vtable and then inside the table is called **dynamic dispatch**.
 
+The indirection **prevents optimization** by the compiler.
+
+<!-- column: 1 -->
 
 ### Type erasure
 
@@ -2303,21 +2405,27 @@ The lookup of methods in this table is called **dynamic dispatch**
 
 The vtables only contain function pointers for methods declared in the trait or it's super-traits.
 
+If you decide that the overhead of a trait object is justified you have to accept the fact you lose any concrete information such as fields of any implementing type. 
+
+Code near trait objects should be able to deal with the methods of the trait and not depend on concrete types.
 
 ---
 
-### Creating trait objects 
+## Creating trait objects 
 
 **Question**: Which of the following traits can be used to create a trait object?
-- A trait with methods that have generic parameters
-- A trait with a method that returns Self
+- A trait that is `Sized`
+- A trait that is `Clone`
 
 <!-- pause -->
 
-**Answer**: neither of them.
+**Answer**: Neither of them. `Sized` is irrelevant since every trait object `dyn T` for `T: Sized` is `!Sized` anyway. Traits that are Clone need information about the size of `Self` to allocate on the stack. This information is not present at run-time. So they both cannot be used to create a trait object.
 
+<!-- pause -->
 
-Traits that can be turned into a trait object are called **object safe**.
+### Object safe traits
+
+There are rules that say which traits are **object safe** and can be turned into traits.
 
 > You must be able to call methods of the trait the same way for any instance of the trait
 > properties guarantee that, no matter what, 
@@ -2328,30 +2436,6 @@ Traits that can be turned into a trait object are called **object safe**.
 
 ---
 
-
-### DSTs
-
-Trait objects are part of the family of **dynamically sized types** (DST) 
-
-- Their type is unknown until run-time, so their size is unknown until run-time.
-- They cannot be allocated on the stack.
-
-All generic type parameters should have a determined size at compile time by default.
-
-This means that `GenericType<D>` is syntax sugar for `GenericType<D: Sized>` 
-
-If you want to use a DST, you have to use `?Sized` as in `GenericType<D: ?Sized>`.
-  
-**Question**: What are fat pointers? Why are they called fat pointers?
-
-<!-- pause -->
-
-**Answer**: References to DSTs are called **fat pointers.** A fat pointer contains a pointer plus some information that makes the DST "complete":
-- the length
-- a pointer to the method table
-  
-
-[See](https://stackoverflow.com/questions/57754901/what-is-a-fat-pointer)
 
 
 ---
@@ -2693,6 +2777,8 @@ assert_eq!((2, Some(2)), iter.size_hint());
 If you are not satisfied, look at [itertools](https://docs.rs/itertools/latest/itertools/).
 
 ---
+
+
 ### Ranges and FnOnce
 
 <!-- column_layout: [1, 1] -->
@@ -2700,6 +2786,9 @@ If you are not satisfied, look at [itertools](https://docs.rs/itertools/latest/i
 <!-- column: 0 -->
 
 #### Question
+
+A difficult one.
+
 ```rust
 use std::ops::RangeFull;
 
@@ -2743,51 +2832,15 @@ In this case main would print 24.
 This code is parsed as 
 
 1. The inner part `|| .. .method()` is parsed as `(|| ..).method()`
+...
+<!-- pause -->
+
 2. The type of `|| ..` is `FnOnce() -> T` where `T` is inferred to be `RangeFull`
 3. We resolve the of the `(|| ..).method()` to the method in `impl<F: FnOnce() -> T, T> Trait for F`.
 4. It prints `2` and returns a closure.
 5. `(|| .. .method())()` evaluates the closure and returns `4`
 
 [See](https://dtolnay.github.io/rust-quiz/33)
-
----
-
-## Implementing a custom iterator
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-
-```rust
-struct Fibonacci {
-    curr: u32,
-    next: u32,
-}
-
-impl Iterator for Fibonacci {
-    type Item = u32;
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.curr;
-
-        self.curr = self.next;
-        self.next = current + self.next;
-        Some(current)
-    }
-}
-```
-
-<!-- column: 1 -->
-
-Return a Fibonacci sequence generator
-
-```rust
-fn fibonacci() -> Fibonacci {
-    Fibonacci { curr: 0, next: 1 }
-}
-```
-
-There is a trait for that! It is called `IntoIter`.
 
 ---
 
@@ -2872,8 +2925,8 @@ There are multiple ways to create iterators.
 <!-- pause -->
 
 **Answer**
-- The iterator returned by `into_iter` may yield any of `T`, `&T` or `&mut T`, depending on the context.
-- The iterator returned by iter will yield `&T`.
+- The iterator returned by `into_iter` on `T` or `&T` may yield any of `T`, `&T` or `&mut T`, depending on the context.
+- The iterator returned by iter on `T` will always yield references.
 <!-- pause -->
 
 ### For loops
@@ -2947,6 +3000,10 @@ The closure provided as an argument to map is only invoked as values are consume
 
 ---
 
+# Errors
+
+---
+
 ## Bubbling errors up
 
 
@@ -2955,6 +3012,8 @@ The closure provided as an argument to map is only invoked as values are consume
 <!-- column: 0 -->
 
 A common decision developers have to make is whether to **bubble up** errors.
+
+### The `Result` type
 
 ```rust
 fn halves_if_even(i: i32) -> Result<i32, Error> {
@@ -2990,7 +3049,7 @@ fn do_the_thing(i: i32) -> Result<i32, Error> {
 
 Another example the `Option` type. 
 
-It takes a closure that returns an "intermediate" result as an `Option` type. 
+The position function returns `None` if no match is found. 
 
 ```rust 
 fn find_element(data: Vec<i32>, target: i32) -> Option<usize> {
@@ -3000,15 +3059,13 @@ fn find_element(data: Vec<i32>, target: i32) -> Option<usize> {
 }
 ```
 
-In both cases we start inside with an intermediate value and we decide halfway based on the intermediate value if we should return early.  
+The question mark propagates the inner `None` to an outer `None`.
 
-**Question**: How would you call this pattern? 
+**Question**: What do `Result` and `Option` have in common?
 
 <!-- pause -->
 
-**Answer**: I would call it one of the following:
-- **short-circuiting**
-- **terminating early**
+**Answer**: In both cases we start inside with an intermediate value and we decide halfway based on the intermediate value if we should return early.  
 
 ---
 
@@ -3024,7 +3081,7 @@ In the following slides we will discover how fallibility is implemented in Rust.
 
 ---
 
-### A casual approach to fallibility
+## Starting from infallible functions
 
 We  may start with the usual infallible function.
 
@@ -3115,11 +3172,15 @@ fn simple_try_fold<A, T, R: Try<Output = A>>(
 
 Notice how the inner early `return` statement became invisible. 
 
-This is adds complexity for newcomers to Rust.
+This new strange syntax **adds complexity** for newcomers to Rust.
 
 ---
 
-### What is `Try`?
+### What is `Try` actually?
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column:   0 -->
 
 Let's take a closer look at the trait `Try` that `?` uses.
 
@@ -3158,6 +3219,35 @@ At this point we arrive at the core of the `Try` trait.
 1. `?` will trigger the evaluation of `branch` on `R`
 2. The custom implementation of `branch` will return break or continue.
 
+See [std](https://doc.rust-lang.org/std/ops/trait.Try.html)
+
+---
+
+## Going back to our fold
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column:   0 -->
+
+```rust
+pub fn explicit_fallible_fold<A, T, R: Try<Output = A>>(
+    iter: impl Iterator<Item = T>,
+    mut accum: A,
+    mut f: impl FnMut(A, T) -> R,
+) -> R {
+    for x in iter {
+        let cf = f(accum, x).branch();
+        match cf {
+            ControlFlow::Continue(a) => accum = a,
+            ControlFlow::Break(r) => return R::from_residual(r),
+        }
+    }
+    R::from_output(accum)
+}
+```
+
+<!-- column: 1 -->
+
 There are two options:
 - **continue** with some value `a` of type `Output`.  
   - `a` becomes the output of the the `?` operator 
@@ -3166,19 +3256,22 @@ There are two options:
   - We never reach the location behind `?`
   - The converted residual `R` is returned
 
-See [std](https://doc.rust-lang.org/std/ops/trait.Try.html)
-
 ---
 
-## Concrete implementations of `Try`
+## `Result` as `Try`
 
-### `Result` 
+<!-- column_layout: [1, 1] -->
+
+<!-- column:   0 -->
+
+
+The most common `Try` type.
 
 The `Result<Success,Error>` type has as associated `Try` types:
 - `Output` = `Success`
 - `Residual` = `Self`
 
-More precisely:
+### Branching
 
 The `Ok` variant of `Result` will trigger a `Continue` with the inner output value.
 
@@ -3192,11 +3285,17 @@ A branch of an `Err` variant of the `Result` type return a `Break` that contains
 assert_eq!(Err::<String, _>(3).branch(), ControlFlow::Break(Err(3)));
 ```
 
+<!-- column:   1 -->
+
+### Early return
+
 The content of the `Break` is passed to the `from_residual` function
 
 ```rust
 assert_eq!(Result::<String, i64>::from_residual(Err(3_u8)), Err(3));
 ```
+
+### Final success
 
 At the end `Success` is converted into `Result<Success, Error>` through the `from_output` function.
 
@@ -3206,16 +3305,24 @@ assert_eq!(<Result<_, String> as Try>::from_output(3), Ok(3));
 
 ---
 
-### `Option`
+## `Option` as `Try`
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column:   0 -->
 
 The associated types of `Option<T>>` are:
 - `Output` = `T`
 - `Residual` = `Self`
 
+### Branching
+
 ```rust
 assert_eq!(Some(3).branch(), ControlFlow::Continue(3));
 assert_eq!(None::<String>.branch(), ControlFlow::Break(None));
 ```
+
+### Early return
 
 If we have a `Break`, the inner `None` is passed to `from_residual`:
 
@@ -3223,6 +3330,9 @@ If we have a `Break`, the inner `None` is passed to `from_residual`:
 assert_eq!(Option::<String>::from_residual(None), None);
 ```
 
+<!-- column: 1 -->
+
+### Successful finish
 
 At the end `T` is converted into `R = Option<T>` through the `from_output` function: 
 
@@ -3230,24 +3340,30 @@ At the end `T` is converted into `R = Option<T>` through the `from_output` funct
 assert_eq!(<Option<_> as Try>::from_output(4), Some(4));
 ```
 
+### Short-circuiting
+
 Evaluating the `?` operator will trigger the branch function and then output a value of associated type `Output = T`:
 
 ```rust
 assert_eq!(Option::from_output(4)?, 4);
 ```
 
+--- 
 
+## What's next?
 
+Coroutines, coroutine implementations, async blocks, futures, async run-times.
 
-### Summary
-
-- Trait bounds
-- Closures
-- Dynamic dispatch
-- Impl traits
 
 ---
 
 ### Questions?
 
-This presentation was made using [`presenterm`](https://github.com/mfontanini/presenterm).
+
+You can always email me at willemvanhulle@gmail.com.
+
+See also the great book "Programming Rust" by Blandy (2021).
+
+
+This presentation was made using Markdown and a Rust tool [`presenterm`](https://github.com/mfontanini/presenterm).
+
