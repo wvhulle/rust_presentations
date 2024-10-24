@@ -47,18 +47,86 @@ trait Animal {
 
 Features:
 
-- The struct implemented corresponds to the argument `self`.
+- The value for which we want to call a method is `self`. 
+- The type of `self` is `Self`, but it can also be, for example, `Rc<Self>`.
 - You can add default function implementations.
 
 ---
 
+## Orphan rule
+
+**Question**: What does **foreign** mean in the context of traits and types? 
+
+<!-- pause -->
+
+**Answer**: Things defined in other crates and in the standard library.
+
+To prevent inconsistencies after imports, there is the **orphan rule**.
+
+Orphan rules:
+- foreign traits cannot be implemented for foreign data types
+- you cannot write `impl` blocks (without trait) for foreign types 
+
+**Question** Why? 
+
+<!-- pause -->
+
+**Answer**: `impl` blocks are visible everywhere. Implementing a trait for a struct in a crate, shouldn't be able to cause another dependent crate to stop compiling. This means there are restrictions on defining `impl` blocks.
+
+---
+
+## Type aliases
+
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+Imagine you have some cool type called `Session`. 
+
+For some reason, it cannot be `clone`.
+
+But you want to share it.
+
+You define a type alias:
+
+```rust
+type SharedSession = Arc<Session>
+```
+
+Now you want to write `impl` blocks on `SharedSession` and define a function. 
+
+<!-- column: 1 -->
+
+```rust
+impl SharedSession {
+    pub fn create_subscriber(&self) {}
+}
+```
+
+This won't work, since `Arc` is foreign (it is in the standard library). 
+
+You need to introduce a local trait first.
+
+```rust
+impl Subscribable for SharedSession {
+    pub fn create_subscriber(&self) {}
+}
+```
+---
+
 ### How do you use traits?
 
-Things we might like about traits:
+Designing traits is a very sensitive subject.
 
-- **Minimal**: just the methods you need. (You can use super-traits to extend.)
-- **Composable**: not mutually exclusive with other traits. (You can use combined traits.)
-- What else do you like about traits ...?
+The way I like to structure my traits:
+
+- **Minimal**: just the methods you need, no less than 2, no more than 5, but 
+  - avoid single-method traits since traits add some boilerplate. 
+  - if you discover "more minimal than others" methods, use super-traits or combined super-traits (see later) 
+- **Composable**: methods that are  **not locally or temporaly dependent** on each others execution throughout the life-time of the program, should go into disjoint traits and used as combined super-traits.
+
+How do you do your traits?
 
 One of the inspirations behind the trait system of Rust:
 
@@ -289,26 +357,33 @@ Primitive:
 - References: `&T`
 - Slices: `&[T]`
 - Tuples
+
+Algebraic data types
 - Structs
 - Enums
 
-Standard library data types
+Generic standard library data types
 
 - Collections: `HashMap`
 - Result
 - Option 
 - Future
   
-
-
 <!-- column: 1 -->
+
+### Algebraic data types
+
+
+
+
+---
 
 ### Polymorphic functions
 
 Functions that take a type parameter.
 
 - Can be free-standing (outside `impl` blocks)
-- Inside an `impl` block
+- Methods inside an `impl` block
 
 You can start with a free version and then an `impl` version.
 
@@ -324,8 +399,6 @@ where
         .collect()            
 }
 ```
-
-<!-- reset_layout -->
 
 Type parameters can be restricted by **trait bounds** in both cases. (see later)
 
@@ -492,7 +565,9 @@ struct Buffer<T> { data: Vec<T> }
 
 <!-- column: 1  -->
 
-Specify `T` as the associated type `Item`. 
+Introduce a type parameter `T` and assign it to the name of the associated type `Item`.
+
+It goes inside the body of the `impl`, **not in the header**.
 
 ```rust
 impl<T> IntoIterator for Buffer<T> {
@@ -629,7 +704,6 @@ impl<T: Add<Output = T>> Add for Point<T> {
 
 Remember that `impl` blocks are visible **everywhere**. 
 
-To prevent inconsistencies, blanket implementations of **foreign traits cannot be applied to foreign data types**.
 
 [See](https://doc.rust-lang.org/book/ch10-02-traits.html)
 
@@ -755,13 +829,15 @@ impl CompSciStudent for Someone  {
 
 ---
 
-## Super traits and method resolution
+## Subclassing
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
 
-We define two traits. One is a super-trait of the other.
+If you come from any other object-oriented programming language. You might want to override methods in super-traits.
+
+This is how such a program would look.
 
 ```rust
 pub trait SuperTrait {
@@ -775,39 +851,31 @@ pub trait SubTrait: SuperTrait {
         println!("Sub")
     }
 }
-```
 
-We `impl` both traits for `char` and use the default implementations.
-```rust
 impl SuperTrait for char { }
 impl SubTrait for char { }
 ```
 
+
 <!-- column: 1 -->
 
-
+Then you call 
 ```rust
 fn main() {
     '?'.method()
 }
 ```
 
-**Question**: what will this program output?
+It will not compile.
 
-<!-- pause -->
-
-**Answer**: Rust does not allow ambiguous method names
-
-
-```txt
-   |
-24 |     '?'.method()
-   |         ^^^^^^ multiple `method` found
-```
 
 Explicit qualification of the trait is necessary.
 
-Overriding methods won't work. This rule is to keep code predictable. Traits can only **extend supertraits** with methods that are not yet in the super-trait.
+**Question**: Why? 
+
+<!-- pause -->
+
+**Answer**: To keep behaviour of complex code with many super-traits predictable. Traits can only **extend supertraits** with methods that are not yet in the super-trait.
 
 ---
 
@@ -821,7 +889,7 @@ Overriding methods won't work. This rule is to keep code predictable. Traits can
 
 <!-- pause -->
 
-### Repeated trait bounds
+### Use case 1: Repeated trait bounds
 
 The first place were super-traits can be useful is when we have different `impl` blocks that have the same set of trait bounds in `where` blocks.
 
@@ -848,8 +916,6 @@ For example, if we have a super-trait defined as
 trait SuperTrait {
     type State;
     type SuperState;
-
-    ....
 }
 ```
 
@@ -885,23 +951,6 @@ trait SubTrait: SuperTrait<State=Self::SubState> {
 ```
 
 Note that we don't have to specify all the associated types of the super-trait. 
-
-### Invalid bounds
-
-However, this won't work:
-
-```rust
-trait SuperTrait {
-    type State;
-}
-
-trait SubTrait: SuperTrait<State: Self::SubState> {
-    type SubState;
-}
-```
-
-You cannot use a new associated type as a trait bound for an associated type in a super trait.
-
 
 ---
 
@@ -1117,7 +1166,7 @@ impl<'a> BorrowedData<'a> for DataHolder<'a> {
 
 <!-- column: 1 -->
 
-### Associated types in super-traits
+### Lifetimes in associated types
 
 A trait may specify an associated type that depends on a life-time.
 
@@ -1141,13 +1190,18 @@ But this won't work. You need to declare a lifetime:
 ```rust
 trait SubTrait: for<'a> SuperTrait<State<'a>: Sync> { }
 ``` 
+
 (Notice how the `for<'a>` appears in front of the supertrait.)
 
 ---
 
 ## Function types
 
-Things that **produce values**.
+**Question**: Give a nice definition of a function.
+
+<!-- pause -->
+
+**Answer**: Things that **produce values**.
 
 ### Traditional function types
 
@@ -1156,35 +1210,16 @@ Rust has a few function-like things:
 - Function pointers
 - Closures
 
-**Question**: Which other things produce values?
-
-<!-- pause -->
-
-
-### Extended function types
-
-To be complete, there are also things with `call`-like functionality such as
-- iterators
-- co-routines
-- futures
-- async iterators
-
-You might be interested in effects: ways to model styles of computation. An effect is an additional “kind” in the formal, type system sense of the word, like a life-time.
-
-See the programming languages: 
-
-- [Koka](https://koka-lang.github.io/koka/doc/index.html)
-- [Effekt](https://effekt-lang.org/)
 
 ---
 
 ## Function traits
 
-Let's focus on Rust.
+
 
 Function items, pointers and closures can be categorized **using the trait system** of Rust.
 
-Function items and function pointers satisfy all these traits, but closures form a ladder:
+Function items and function pointers **satisfy all these traits**, but closures form a ladder:
 
 1. `Fn`: closures that do not capture mutable references and may be called infinitely
 2. `FnMut`: closures that may reference mutable variables
@@ -1194,9 +1229,80 @@ The relationship between them is `Fn => FnMut => FnOnce`.
 
 ---
 
+## What else?
+
+**Question**: These three function traits are nice, but which other things produce values?
+
+<!-- pause -->
+
+### Alternative functions
+
+To be complete, there are also things with `call`-like functionality such as
+- iterators
+- co-routines and generators
+- **async blocks**
+- **async iterators**
+- never ending functions (the **never** type `!`)
+- fallible functions (`Result` monad)
+- panicking functions
+- unsafe blocks (code with possibly dangling pointers)
+
+All these ways to produce values can be seen as **effects**: modes of computation or ways to have side-effects
+
+--- 
+
+## Effect syntax
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+
+Different effects introduce duplication. For example, there are similar traits: `AsyncRead` vs `Read`.
+
+One proposal is
+
+```rust
+#[maybe(async)]
+struct File { .. }
+
+#[maybe(async)] 
+impl File {
+    #[maybe(async)]
+    fn open<P>(p: P) -> Result<Self>
+    where
+        P: AsRef<#[maybe(async)] Path>;
+}
+```
+
+See the blog post about Rust written by [Yoshua](https://blog.yoshuawuyts.com/extending-rusts-effect-system/)
+
+<!-- column: 1 -->
+
+
+The Rust syntax proposal is quite ugly compared to Koka
+
+```koka
+fun square1( x : int ) : total int   { x*x }
+fun square2( x : int ) : console int { println( "a not so secret side-effect" ); x*x }
+fun square3( x : int ) : div int     { x * square3( x ) }
+fun square4( x : int ) : exn int     { throw( "oops" ); x*x }
+```
+
+See:
+
+- [Koka](https://koka-lang.github.io/koka/doc/index.html)
+- [Effekt](https://effekt-lang.org/)
+
+Let's focus on Rust.
+
+---
+
 ## Function items
 
 Named function declarations that implement all function traits `Fn, FnMut, FnOnce`. 
+
+### Free functions
 
 May be on top-level or nested as **helper functions**.
 
@@ -1204,7 +1310,9 @@ May be on top-level or nested as **helper functions**.
 fn foo<T>() { }
 ```
 
-Or they an appear as methods in traits.
+### Methods
+
+Or they appear as methods in traits.
 
 
 ```rust
@@ -1295,7 +1403,7 @@ let x = &mut foo::<i32>;
 
 **Answer**: Cast them as function pointers (see in a few slides).
 
-Recursion in function items is possible but discouraged.
+Recursion in function items is possible but discouraged because no tail-call optimization happens and stack overflow may happen easily.
 
 ---
 
@@ -1411,19 +1519,17 @@ See [Pretzelhammer](https://github.com/pretzelhammer/rust-blog/blob/master/posts
 
 <!-- column: 0 -->
 
-The implementation of closures is taken for granted in most languages. Rust is more low-level and it is important to know how they work under the hood.
+The implementation of closures is taken for granted in most dynamic languages. Many low-level languages don't have them. Rust strikes a balance, so it is important to know how closures work under the hood.
 
 The **body block of the closure is analyzed**: 
 1. variables in the body that refer to variables in the surrounding scope are marked as captured
-2. struct generated at compile time with as fields the references to the captured variables, it serves as the environment for the closure body
-  - the struct is invisible and out of reach for the programmer in normal Rust code
-  
-### Types of closures
+2. `struct` generated at compile time with as fields the references to the captured variables, it serves as the environment for the closure body
+ 
+The generated `struct` is **invisible**. Consequences:
+- The direct type of a closure is implicit and cannot be used directly.
+- Closures can only be referenced through their trait signatures (we will need `impl Trait`, see later)
 
-- the direct type of a closure is implicit and cannot be used directly
-- so closures are called **unnameable types** (also called **Voldemort types**)
-
-[See](https://huonw.github.io/blog/2015/05/finding-closure-in-rust/)
+This explains why closures are called **unnameable types** or **Voldemort types**.
 
 <!-- column: 1 -->
 
@@ -1447,35 +1553,37 @@ impl<'v> Fn() for Environment<'v> {
 let closure = Environment { v: &mut v }
 ```
 
+### Marker traits 
 
+Because closures are just `Environment` structs, they behave like structs:
+- They implement marker traits when captured content does: `Sync`, `Send`, `Copy`, `Clone`.
+- They may capture data that contains references, so they can have lifetime bounds.
 
-### Marker traits on closures:
-
-- just like structs, closures may implement `Copy`, `Clone`,  `Send` and `Sync`
-- they only implement marker traits when captured content does.
-
+For details about the construction, see [Finding closure in Rust](https://huonw.github.io/blog/2015/05/finding-closure-in-rust/)
 
 ---
+
 ## Variants of closures
 
-
-### `FnOnce`
+### The base case `FnOnce`
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
 
+The least a closure should be able to do is be called once = the **base case**.
 
-The least a closure should be able to do is be called once.
 
-How is a closure that can be called once implemented?
-
-Let's modify the rough model a bit. 
+Imagine the following closure 
 
 ```rust
-let v = vec![];
-let closure = || v.push(1);
+let mut v = vec![];
+let closure = move || v.push(1);
+```
 
+What does this compile to?
+
+```rust
 struct Environment {
     v: Vec<i32>
 }
@@ -1488,17 +1596,23 @@ impl FnOnce() for Environment {
 let closure = Environment { v }
 ```
 
-Notice that the environment takes ownership of the local variable `v`. 
 
 <!-- column: 1 -->
 
-Notice that the signature of `call` is written as `call(self)` which means that it's type is `Environment -> ()`.
+Notice how **capture-by-value** works:
 
-The body of the call function:
-- may mutate captured variables or references
-- May move variables that are moved in, back out
-  - consume captured variables and drop them
-  - apply functions to them and call by value, not by reference
+1. we mark the closure as call by value with `move`.
+2. the generated environment `struct` takes ownership of the local variable `v`. 
+
+In the `struct` of a `FnOnce` closure the signature of `call` is written as `call(self)` which means that it's type is `Environment -> ()`. 
+
+In general, the body of a `FnOnce` closure may:
+
+- mutate captured mutable variables or references.
+- move references or variables captured by value with `move` into new structs
+- drop variables captured by value with `move`
+
+What can closures **not do**: drop things that are referenced elsewhere.
 
 ---
 
