@@ -1227,74 +1227,6 @@ Function items and function pointers **satisfy all these traits**, but closures 
 
 The relationship between them is `Fn => FnMut => FnOnce`.
 
----
-
-## What else?
-
-**Question**: These three function traits are nice, but which other things produce values?
-
-<!-- pause -->
-
-### Alternative functions
-
-To be complete, there are also things with `call`-like functionality such as
-- iterators
-- co-routines and generators
-- **async blocks**
-- **async iterators**
-- never ending functions (the **never** type `!`)
-- fallible functions (`Result` monad)
-- panicking functions
-- unsafe blocks (code with possibly dangling pointers)
-
-All these ways to produce values can be seen as **effects**: modes of computation or ways to have side-effects
-
---- 
-
-## Effect syntax
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-
-Different effects introduce duplication. For example, there are similar traits: `AsyncRead` vs `Read`.
-
-One proposal is
-
-```rust
-#[maybe(async)]
-struct File { .. }
-
-#[maybe(async)] 
-impl File {
-    #[maybe(async)]
-    fn open<P>(p: P) -> Result<Self>
-    where
-        P: AsRef<#[maybe(async)] Path>;
-}
-```
-
-See the blog post about Rust written by [Yoshua](https://blog.yoshuawuyts.com/extending-rusts-effect-system/)
-
-<!-- column: 1 -->
-
-
-The Rust syntax proposal is quite ugly compared to Koka
-
-```koka
-fun square1( x : int ) : total int   { x*x }
-fun square2( x : int ) : console int { println( "a not so secret side-effect" ); x*x }
-fun square3( x : int ) : div int     { x * square3( x ) }
-fun square4( x : int ) : exn int     { throw( "oops" ); x*x }
-```
-
-See:
-
-- [Koka](https://koka-lang.github.io/koka/doc/index.html)
-- [Effekt](https://effekt-lang.org/)
-
-Let's focus on Rust.
 
 ---
 
@@ -2001,211 +1933,10 @@ fn main() {
 
 (See Tolnay)
 
-
----
-### Ranges and FnOnce
-
-
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-
-#### Question
-```rust
-use std::ops::RangeFull;
-
-trait Trait {
-    fn method(&self) -> fn();
-}
-
-impl Trait for RangeFull {
-    fn method(&self) -> fn() {
-        print!("1");
-        || print!("3")
-    }
-}
-
-impl<F: FnOnce() -> T, T> Trait for F {
-    fn method(&self) -> fn() {
-        print!("2");
-        || print!("4")
-    }
-}
-```
-
-<!-- column: 1 -->
-
-What does this print?
-
-```rust
-fn main() {
-    (|| .. .method())();
-}
-```
-
-<!-- pause --> 
-
-#### Short answer
-
-In this case main would print 24.
-
-#### Long answer
-
-This code is parsed as 
-
-1. `(|| ..).method()`
-2. this an invocation of the impl of `Trait` on `FnOnce() -> T` where `T` is inferred to be `RangeFull`. 
-
-[See](https://dtolnay.github.io/rust-quiz/33)
-
 ---
 
-## Iterators
 
-
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-
-```rust
-struct Fibonacci {
-    curr: u32,
-    next: u32,
-}
-
-impl Iterator for Fibonacci {
-    type Item = u32;
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.curr;
-
-        self.curr = self.next;
-        self.next = current + self.next;
-        Some(current)
-    }
-}
-```
-
-<!-- column: 1 -->
-
-Return a Fibonacci sequence generator
-
-```rust
-fn fibonacci() -> Fibonacci {
-    Fibonacci { curr: 0, next: 1 }
-}
-
-fn main() {
-    // `0..3` is an `Iterator` that generates: 0, 1, and 2.
-    let mut sequence = 0..3;
-
-    println!("Four consecutive `next` calls on 0..3");
-    println!("> {:?}", sequence.next());
-    println!("> {:?}", sequence.next());
-    println!("> {:?}", sequence.next());
-    println!("> {:?}", sequence.next());
-```
-
----
-
-## Into iter vs. iter
-
-Iterators have to be generated from iterable data structures. 
-
-
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-### Creating iterators
-
-There are multiple ways to create iterators.
-
-**Question**: What is the difference between `into_iter` and `iter`?
-
-<!-- pause -->
-
-**Answer**
-- The iterator returned by `into_iter` may yield any of `T`, `&T` or `&mut T`, depending on the context.
-- The iterator returned by iter will yield `&T`.
-<!-- pause -->
-
-### For loops
-
-**Question**: Does a for loop use `into_iter` or `iter`?
-
-<!-- pause -->
-
-**Answer**: `into_iter`
-
-<!-- column: 1 -->
-
-A for loop desugars to:
-
-```rust
-let mut it = values.into_iter();
-loop {
-    match it.next() {
-        Some(x) => println!("{}", x),
-        None => break,
-    }
-}
-```
-
-[See](https://hermanradtke.com/2015/06/22/effectively-using-iterators-in-rust.html/)
-
----
-
-### Lazy map
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-
-#### Question
-
-```rust
-fn main() {
-    let input = vec![1, 2, 3];
-
-    let parity = input
-        .iter()
-        .map(|x| {
-            print!("{}", x);
-            x % 2
-        });
-
-    for p in parity {
-        print!("{}", p);
-    }
-}
-```
-
-<!-- column: 1 -->
-
-<!-- pause -->
-#### Short answer
-```
-112031
-```
-
-<!-- pause -->
-
-
-#### Long answer
-
-The closure provided as an argument to map is only invoked as values are consumed from the resulting iterator. The closure is not applied eagerly to the entire input stream up front.
-
-[See](https://dtolnay.github.io/rust-quiz/26)
-
----
-
-## Dealing with complex types
+## How should we handle complex types?
 
 <!-- column_layout: [1, 1] -->
 
@@ -2214,7 +1945,7 @@ The closure provided as an argument to map is only invoked as values are consume
 Sometimes
 - we don't know the type
   - the particular instance of a trait we exactly need as input or output for a function signature
-  - the actual type is hidden from the user. These types are called unnameable or Voldemort types
+  - the actual type is hidden from the user. These types are called unnameable or Voldemort types (for example closures)
 - we know the type, but the full type is too long to be readable
   - iterator implementors
   - future combinators (see next session)
@@ -2239,13 +1970,275 @@ Benefits of opaque types
    
 ---
 
+
+### `impl Trait`
+
+The other type of opaque types or type elision.
+
+Syntax sugar for hardcoding a specific type that can be inferred by the compiler
+
+Benefits:
+- No extra heap allocation
+- No dynamic dispatch overhead
+
+Synonyms
+- anonymous types
+
+---
+
+## Basic example
+
+```rust
+fn parse_csv_document<R: std::io::BufRead>(src: R) -> std::io::Result<Vec<Vec<String>>> {
+    src.lines()
+        .map(|line| {
+            // For each line in the source
+            line.map(|line| {
+                // If the line was read successfully, process it, if not, return the error
+                line.split(',') // Split the line separated by commas
+                    .map(|entry| String::from(entry.trim())) // Remove leading and trailing whitespace
+                    .collect() // Collect all strings in a row into a Vec<String>
+            })
+        })
+        .collect() // Collect all lines into a Vec<Vec<String>>
+}
+```
+
+---
+
+## `impl Trait` in arguments
+
+Since the generic type parameter `R` only appears once (in the **argument position** and **without multiple trait bounds**), there is no use for declaring it explicitly. We can replace it by an `impl Trait` notation (an anonymous function argument type):
+
+```rust
+fn parse_csv_document(src: impl std::io::BufRead) -> std::io::Result<Vec<Vec<String>>> {
+    src.lines()
+        .map(|line| {
+            // For each line in the source
+            line.map(|line| {
+                // If the line was read successfully, process it, if not, return the error
+                line.split(',') // Split the line separated by commas
+                    .map(|entry| String::from(entry.trim())) // Remove leading and trailing whitespace
+                    .collect() // Collect all strings in a row into a Vec<String>
+            })
+        })
+        .collect() // Collect all lines into a Vec<Vec<String>>
+}
+```
+
+[See](https://doc.rust-lang.org/rust-by-example/trait/impl_trait.html)
+
+---
+
+### `impl` in return type
+
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+```rust
+use std::iter;
+use std::vec::IntoIter;
+
+// This function combines two `Vec<i32>` and returns an iterator over it.
+// Look how complicated its return type is!
+fn combine_vecs_explicit_return_type(
+    v: Vec<i32>,
+    u: Vec<i32>,
+) -> iter::Cycle<iter::Chain<IntoIter<i32>, IntoIter<i32>>> {
+    v.into_iter().chain(u.into_iter()).cycle()
+}
+```
+
+<!-- pause -->
+
+```rust
+// This is the exact same function, but its return type uses `impl Trait`.
+// Look how much simpler it is!
+fn combine_vecs(
+    v: Vec<i32>,
+    u: Vec<i32>,
+) -> impl Iterator<Item=i32> {
+    v.into_iter().chain(u.into_iter()).cycle()
+}
+```
+
+<!-- column: 1 -->
+
+```rust
+fn main() {
+    let v1 = vec![1, 2, 3];
+    let v2 = vec![4, 5];
+    let mut v3 = combine_vecs(v1, v2);
+    assert_eq!(Some(1), v3.next());
+    assert_eq!(Some(2), v3.next());
+    assert_eq!(Some(3), v3.next());
+    assert_eq!(Some(4), v3.next());
+    assert_eq!(Some(5), v3.next());
+    println!("all done");
+}
+```
+[See](https://doc.rust-lang.org/rust-by-example/trait/impl_trait.html)
+
+---
+
+## The  `impl` everywhere project
+
+1. Signatures of methods in traits can use `impl Trait`, also known as "return position impl Trait" (RPIT) 
+   - Implemented using a kind of associated types [See](https://blog.rust-lang.org/2023/12/21/async-fn-rpit-in-traits.html)
+2. Type aliases can use `impl Trait`: `type I = impl Iterator<Item = u32>`. [See](https://rust-lang.github.io/impl-trait-initiative/explainer/tait.html)
+3. Traits with associated types can use `impl Trait` as bounds for the associated type (in nightly Rust)
+4. In local variable bindings `let x: impl Future = foo()` (planned) 
+
+
+
+[See](https://rust-lang.github.io/impl-trait-initiative/)
+
+
+---
+
+## Example: `impl` for associated types
+
+To enable it, in crate root: `#![feature(impl_trait_in_assoc_type)]`
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+First we define a new trait 
+
+```rust
+trait Container {
+    fn items(&self) -> impl Iterator<Item = Widget>;
+}
+
+impl Container for MyContainer {
+    fn items(&self) -> impl Iterator<Item = Widget> {
+        self.items.iter().cloned()
+    }
+}
+```
+
+(Notice we used the stabilised return position `impl Trait`)
+
+<!-- column: 1 -->
+
+Then we define something that may have a subset
+
+```rust
+struct SubsetWrapper<'a> {
+    everything: &'a HashMap<usize, i32>,
+    subset_ids: &'a [usize],
+}
+```
+
+And we use the unstable syntax for `impl` bounds on associated types
+
+```rust
+impl<'a> IntoIterator for &SubsetWrapper<'a> {
+    type Item = &'a i32;
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.subset_ids
+            .iter()
+            .map(|id| self.everything.get(id).unwrap())
+    }
+}
+```
+
+
+---
+## New lifetime capture rules
+
+
+Rust 2021: the following compiles because `impl` does not capture `s`
+```rust
+fn indices<'s, T>(
+    slice: &'s [T],
+) -> impl Iterator<Item = usize> {
+    0 .. slice.len()
+}
+```
+
+<!-- pause -->
+
+Rust 2024: `impl` will capture lifetime parameter `'s`.
+```rust
+fn main() {
+    let mut data = vec![1, 2, 3];
+    let i = indices(&data);
+    data.push(4); // <-- Error!
+    i.next(); // <-- assumed to access `&data`
+}
+```
+
+New default = the hidden types for a return-position impl Trait can use any generic parameter in scope.
+
+---
+
+## New syntax
+
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+Introduction of **use bound** `impl Trait + use<'x, T>`: 
+  - the hidden type is allowed to use `'x` and `T`
+  - but no other generic parameters in scope
+
+To exempt from lifetime parameter capture, use `use<>`
+
+```rust
+fn indices<'s, T>(
+    slice: &'s [T],
+) -> impl Iterator<Item = usize> + use<> {
+    //                             -----
+    //             Return type does not use `'s` or `T`
+    0 .. slice.len()
+}
+```
+
+<!-- column: 1 -->
+
+Advantage: fine control over capturing of lifetimes in the arguments
+
+
+[See](https://blog.rust-lang.org/2024/09/05/impl-trait-capture-rules.html)
+
+
+---
+
+## Impl on type aliases
+
+```rust
+mod odd {
+    pub type OddIntegers = std::iter::Filter<std::ops::Range<u32>, /* what goes here? */>;
+
+    pub fn odd_integers(start: u32, stop: u32) -> OddIntegers {
+        (start..stop).filter(|i| i % 2 != 0)
+    }
+}
+```
+
+---
+
 ### Trait objects
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
 
-When don't know the concrete type until runtime, we can replace the concrete type by a trait object and call methods through **dynamic dispatch** (marked with the `dyn` keyword).
+Every type system has its limits. 
+
+There is only so much you can now at compile-time.
+
+The solution to this problem is **trait objects**.
+
+These are a way to handle things that satisfy some trait but we don't know anything else about them.
+
+
 
 ```rust
 pub trait Draw {
@@ -2265,21 +2258,51 @@ impl Screen {
 }
 ```
 
+The trait and it's methods is all we have for a trait object. 
+
+
+Notice the `dyn` keyword that declares the presence of a trait object. It is compulsory, since trait objects are handled completely different from `impl Trait`s.
+
+
 <!-- column: 1 -->
 
+### Unsizedness
 
-multiple concrete types to fill in for the trait object at runtime `=>` type elision
+Different things that implement the same trait, may have a different size. In theory, you could compute an upper bound on the size given all available implementing types, but that would be inefficient. Instead, allocation happens on the heap, dynamically, as needed.
+
+In addition, Rust marks all trait objects as `!Sized`.
+
+**Question**: What is the meaing of `!Sized` in this context "size may vary greatly at run-time".
+
+<!-- pause -->
+
+**Answer**: The`!Sized` means a trait object is not stored on the stack, but on the heap.
+
+### Dispatch of methods
+
+Additionally there is some overhead when we call methods on trait objects. 
+
+For all the `struct`s or types that implement the trait in the trait object, the compiler has to create a separate table (called a **vtable**) with a map 
+
+```
+method name -> function pointer
+```
+
+Each trait object stores a pointer to the right table at run-time.
+
+- The table may be quite large and increase the size of the compiled binary. 
+- Going from the value to the vtable and then to a function pointer adds a certain amount of time.
+- Method calls are indirect and cannot be optimized by the compiler 
+
+The lookup of methods in this table is called **dynamic dispatch**
 
 
-How is it implemented?
-- a pointer to an object
-- a pointer to a method table, called a **vtable** with function pointers for each method of the trait
+### Type erasure
 
+**Important**: You can't magically extract information from a trait object that is not declared in the trait. 
 
-Disadvantages
-- Cannot be pushed on the stack directly, 
-- has to be on the heap or behind a pointer on the stack
-- Method call is determined at runtime, less optimizations
+The vtables only contain function pointers for methods declared in the trait or it's super-traits.
+
 
 ---
 
@@ -2530,127 +2553,245 @@ impl<'a> dyn GenericTrait<'a> + 'a {}
 [See](https://github.com/pretzelhammer/rust-blog/blob/master/posts/common-rust-lifetime-misconceptions.md#6-boxed-trait-objects-dont-have-lifetimes)
 
 
-
 ---
 
-### `impl Trait`
+## What else?
 
-The other type of opaque types or type elision.
+**Question**: These three function traits are nice, but which other things produce values?
 
-Syntax sugar for hardcoding a specific type that can be inferred by the compiler
+<!-- pause -->
 
-Benefits:
-- No extra heap allocation
-- No dynamic dispatch overhead
+### Alternative functions
 
-Synonyms
-- anonymous types
+To be complete, there are also things with `call`-like functionality such as
+- iterators
+- co-routines and generators
+- **async blocks** and futures
+- **async iterators**
+- never-ending or diverging functions (the **never** type `!`)
+- fallible functions (`Result` monad)
+- panicking functions
+- unsafe blocks (code with possibly dangling pointers)
 
----
+All these ways to produce values can be seen as **effects**: modes of computation or ways to have side-effects
 
-## Basic example
+--- 
 
-```rust
-fn parse_csv_document<R: std::io::BufRead>(src: R) -> std::io::Result<Vec<Vec<String>>> {
-    src.lines()
-        .map(|line| {
-            // For each line in the source
-            line.map(|line| {
-                // If the line was read successfully, process it, if not, return the error
-                line.split(',') // Split the line separated by commas
-                    .map(|entry| String::from(entry.trim())) // Remove leading and trailing whitespace
-                    .collect() // Collect all strings in a row into a Vec<String>
-            })
-        })
-        .collect() // Collect all lines into a Vec<Vec<String>>
-}
-```
-
----
-
-## `impl Trait` in arguments
-
-Since the generic type parameter `R` only appears once (in the **argument position** and **without multiple trait bounds**), there is no use for declaring it explicitly. We can replace it by an `impl Trait` notation (an anonymous function argument type):
-
-```rust
-fn parse_csv_document(src: impl std::io::BufRead) -> std::io::Result<Vec<Vec<String>>> {
-    src.lines()
-        .map(|line| {
-            // For each line in the source
-            line.map(|line| {
-                // If the line was read successfully, process it, if not, return the error
-                line.split(',') // Split the line separated by commas
-                    .map(|entry| String::from(entry.trim())) // Remove leading and trailing whitespace
-                    .collect() // Collect all strings in a row into a Vec<String>
-            })
-        })
-        .collect() // Collect all lines into a Vec<Vec<String>>
-}
-```
-
-[See](https://doc.rust-lang.org/rust-by-example/trait/impl_trait.html)
-
----
-
-### `impl` in return type
-
+## Effect syntax
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
-```rust
-use std::iter;
-use std::vec::IntoIter;
 
-// This function combines two `Vec<i32>` and returns an iterator over it.
-// Look how complicated its return type is!
-fn combine_vecs_explicit_return_type(
-    v: Vec<i32>,
-    u: Vec<i32>,
-) -> iter::Cycle<iter::Chain<IntoIter<i32>, IntoIter<i32>>> {
-    v.into_iter().chain(u.into_iter()).cycle()
+
+Different effects introduce duplication. For example, there are similar traits: `AsyncRead` vs `Read`.
+
+One proposal is
+
+```rust
+#[maybe(async)]
+struct File { .. }
+
+#[maybe(async)] 
+impl File {
+    #[maybe(async)]
+    fn open<P>(p: P) -> Result<Self>
+    where
+        P: AsRef<#[maybe(async)] Path>;
 }
 ```
 
-<!-- pause -->
+See the blog post about Rust written by [Yoshua](https://blog.yoshuawuyts.com/extending-rusts-effect-system/)
+
+<!-- column: 1 -->
+
+
+The Rust syntax proposal is quite ugly compared to Koka
+
+```koka
+fun square1( x : int ) : total int   { x*x }
+fun square2( x : int ) : console int { println( "a not so secret side-effect" ); x*x }
+fun square3( x : int ) : div int     { x * square3( x ) }
+fun square4( x : int ) : exn int     { throw( "oops" ); x*x }
+```
+
+See:
+
+- [Koka](https://koka-lang.github.io/koka/doc/index.html)
+- [Effekt](https://effekt-lang.org/)
+
+Let's focus on Rust.
+
+---
+
+## Creating simple iterators
+
+An iterator is the simplest kind of effect. It's side-effect is **advancing some internal state** incrementally.
+
+Iterators are a useful intermediate data structure that are **easy to reason about** and handle.
+
+In most languages iterators are written with the `yield` keyword. Rust goes for an approach with traits and introduces `next`.
+
+### Rust
+
+There are a few built-in constructors for iterators
+
+- Bounded ranges `0..10`
+- Unbounded ranges `..` (`RangeFull`)
+
+Iterators can often be constructed from iterable data types with the `iter` or `into_iter` methods.
+
+The most basic iterable data type is a **slice** (or also called an array), which is allocated on the stack. 
+
+Slices give rise to different iterators
 
 ```rust
-// This is the exact same function, but its return type uses `impl Trait`.
-// Look how much simpler it is!
-fn combine_vecs(
-    v: Vec<i32>,
-    u: Vec<i32>,
-) -> impl Iterator<Item=i32> {
-    v.into_iter().chain(u.into_iter()).cycle()
+let slice = ['r', 'u', 's', 't'];
+let mut iter = slice.windows(2);
+assert_eq!(iter.next(), Some(&['r', 'u'][..]));
+assert_eq!(iter.next(), Some(&['u', 's'][..]));
+assert_eq!(iter.next(), Some(&['s', 't'][..]));
+assert_eq!(iter.next(), None);
+```
+
+
+---
+
+## Juggling with iterators
+
+Iterators have many helper methods, called **adapters**..
+
+```rust
+let a = ["1", "two", "NaN", "four", "5"];
+
+let mut iter = a.iter().filter_map(|s| s.parse().ok());
+
+assert_eq!(iter.next(), Some(1));
+assert_eq!(iter.next(), Some(5));
+assert_eq!(iter.next(), None);
+```
+
+Clippy will usually detect when you need these adapters.
+
+The method `size_hint` gives a lower and optional upper bound on the remaining items.
+
+```rust
+let a = [1, 2, 3];
+let mut iter = a.iter();
+assert_eq!((3, Some(3)), iter.size_hint());
+let _ = iter.next();
+assert_eq!((2, Some(2)), iter.size_hint());
+```
+
+**Question**: Which function uses the `size_hint`?
+
+<!-- pause -->
+
+**Answer**: The `collect` function needs to know how much empty space to allocate.
+
+
+If you are not satisfied, look at [itertools](https://docs.rs/itertools/latest/itertools/).
+
+---
+### Ranges and FnOnce
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+#### Question
+```rust
+use std::ops::RangeFull;
+
+trait Trait {
+    fn method(&self) -> fn();
+}
+
+impl Trait for RangeFull {
+    fn method(&self) -> fn() {
+        print!("1");
+        || print!("3")
+    }
+}
+
+impl<F: FnOnce() -> T, T> Trait for F {
+    fn method(&self) -> fn() {
+        print!("2");
+        || print!("4")
+    }
 }
 ```
 
 <!-- column: 1 -->
 
+What does this print?
+
 ```rust
 fn main() {
-    let v1 = vec![1, 2, 3];
-    let v2 = vec![4, 5];
-    let mut v3 = combine_vecs(v1, v2);
-    assert_eq!(Some(1), v3.next());
-    assert_eq!(Some(2), v3.next());
-    assert_eq!(Some(3), v3.next());
-    assert_eq!(Some(4), v3.next());
-    assert_eq!(Some(5), v3.next());
-    println!("all done");
+    (|| .. .method())();
 }
 ```
-[See](https://doc.rust-lang.org/rust-by-example/trait/impl_trait.html)
+
+<!-- pause --> 
+
+#### Short answer
+
+In this case main would print 24.
+
+#### Long answer
+
+This code is parsed as 
+
+1. The inner part `|| .. .method()` is parsed as `(|| ..).method()`
+2. The type of `|| ..` is `FnOnce() -> T` where `T` is inferred to be `RangeFull`
+3. We resolve the of the `(|| ..).method()` to the method in `impl<F: FnOnce() -> T, T> Trait for F`.
+4. It prints `2` and returns a closure.
+5. `(|| .. .method())()` evaluates the closure and returns `4`
+
+[See](https://dtolnay.github.io/rust-quiz/33)
 
 ---
 
-#### `impl` everywhere
+## Implementing a custom iterator
 
-1. Signatures of methods in traits can use `impl Trait`, also known as "return position impl Trait" (RPIT) 
-   - Implemented using a kind of associated types [See](https://blog.rust-lang.org/2023/12/21/async-fn-rpit-in-traits.html)
-2. Type aliases can use `impl Trait`: `type I = impl Iterator<Item = u32>`. 
-3. Traits with associated types can use `impl Trait` as bounds for the associated type (in nightly Rust)
-4. In local variable bindings `let x: impl Future = foo()` (planned) 
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+
+```rust
+struct Fibonacci {
+    curr: u32,
+    next: u32,
+}
+
+impl Iterator for Fibonacci {
+    type Item = u32;
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.curr;
+
+        self.curr = self.next;
+        self.next = current + self.next;
+        Some(current)
+    }
+}
+```
+
+<!-- column: 1 -->
+
+Return a Fibonacci sequence generator
+
+```rust
+fn fibonacci() -> Fibonacci {
+    Fibonacci { curr: 0, next: 1 }
+}
+```
+
+There is a trait for that! It is called `IntoIter`.
+
+---
+
+## Implementing `IntoIter`
 
 
 <!-- column_layout: [1, 1] -->
@@ -2658,13 +2799,32 @@ fn main() {
 <!-- column: 0 -->
 
 ```rust
-trait Container {
-    fn items(&self) -> impl Iterator<Item = Widget>;
+struct Grid {
+    x_coords: Vec<u32>,
+    y_coords: Vec<u32>,
 }
 
-impl Container for MyContainer {
-    fn items(&self) -> impl Iterator<Item = Widget> {
-        self.items.iter().cloned()
+
+struct GridIter {
+    grid: Grid,
+    i: usize,
+    j: usize,
+}
+
+impl Iterator for GridIter {
+    type Item = (u32, u32);
+
+    fn next(&mut self) -> Option<(u32, u32)> {
+        if self.i >= self.grid.x_coords.len() {
+            self.i = 0;
+            self.j += 1;
+            if self.j >= self.grid.y_coords.len() {
+                return None;
+            }
+        }
+        let res = Some((self.grid.x_coords[self.i], self.grid.y_coords[self.j]));
+        self.i += 1;
+        res
     }
 }
 ```
@@ -2672,85 +2832,411 @@ impl Container for MyContainer {
 <!-- column: 1 -->
 
 ```rust
-struct SubsetWrapper<'a> {
-    everything: &'a HashMap<usize, i32>,
-    subset_ids: &'a [usize],
+impl IntoIterator for Grid {
+    type Item = (u32, u32);
+    type IntoIter = GridIter;
+    fn into_iter(self) -> GridIter {
+        GridIter { grid: self, i: 0, j: 0 }
+    }
 }
 
-impl<'a> IntoIterator for &SubsetWrapper<'a> {
-    type Item = &'a i32;
-    type IntoIter = impl Iterator<Item = Self::Item>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.subset_ids
-            .iter()
-            .map(|id| self.everything.get(id).unwrap())
+fn main() {
+    let grid = Grid { x_coords: vec![3, 5, 7, 9], y_coords: vec![10, 20, 30, 40] };
+    for (x, y) in grid {
+        println!("point = {x}, {y}");
     }
 }
 ```
 
-[See](https://rust-lang.github.io/impl-trait-initiative/)
-
----
-## New lifetime capture rules
-
-
-Rust 2021: the following compiles because `impl` does not capture `s`
-```rust
-fn indices<'s, T>(
-    slice: &'s [T],
-) -> impl Iterator<Item = usize> {
-    0 .. slice.len()
-}
-```
-
-<!-- pause -->
-
-Rust 2024: `impl` will capture lifetime parameter `'s`.
-```rust
-fn main() {
-    let mut data = vec![1, 2, 3];
-    let i = indices(&data);
-    data.push(4); // <-- Error!
-    i.next(); // <-- assumed to access `&data`
-}
-```
-
-New default = the hidden types for a return-position impl Trait can use any generic parameter in scope.
+See [Google](https://google.github.io/comprehensive-rust/iterators/intoiterator.html)
 
 ---
 
-## New syntax
+## Into iter vs. iter
+
+Iterators have to be generated from iterable data structures. 
+
 
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
 
-Introduction of **use bound** `impl Trait + use<'x, T>`: 
-  - the hidden type is allowed to use `'x` and `T`
-  - but no other generic parameters in scope
+### Creating iterators
 
-To exempt from lifetime parameter capture, use `use<>`
+There are multiple ways to create iterators.
+
+**Question**: What is the difference between `into_iter` and `iter`?
+
+<!-- pause -->
+
+**Answer**
+- The iterator returned by `into_iter` may yield any of `T`, `&T` or `&mut T`, depending on the context.
+- The iterator returned by iter will yield `&T`.
+<!-- pause -->
+
+### For loops
+
+**Question**: Does a for loop use `into_iter` or `iter`?
+
+<!-- pause -->
+
+**Answer**: `into_iter`
+
+<!-- column: 1 -->
+
+A `for x in it` where `it: IntoIterator` desugars to:
 
 ```rust
-fn indices<'s, T>(
-    slice: &'s [T],
-) -> impl Iterator<Item = usize> + use<> {
-    //                             -----
-    //             Return type does not use `'s` or `T`
-    0 .. slice.len()
+let mut it = values.into_iter();
+loop {
+    match it.next() {
+        Some(x) => println!("{}", x),
+        None => break,
+    }
+}
+```
+
+[See](https://hermanradtke.com/2015/06/22/effectively-using-iterators-in-rust.html/)
+
+---
+
+### Lazy map
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+
+#### Question
+
+```rust
+fn main() {
+    let input = vec![1, 2, 3];
+
+    let parity = input
+        .iter()
+        .map(|x| {
+            print!("{}", x);
+            x % 2
+        });
+
+    for p in parity {
+        print!("{}", p);
+    }
 }
 ```
 
 <!-- column: 1 -->
 
-Advantage: fine control over capturing of lifetimes in the arguments
+<!-- pause -->
+#### Short answer
+```
+112031
+```
+
+<!-- pause -->
 
 
-[See](https://blog.rust-lang.org/2024/09/05/impl-trait-capture-rules.html)
+#### Long answer
+
+The closure provided as an argument to map is only invoked as values are consumed from the resulting iterator. The closure is not applied eagerly to the entire input stream up front.
+
+[See](https://dtolnay.github.io/rust-quiz/26)
 
 ---
+
+## Bubbling errors up
+
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+A common decision developers have to make is whether to **bubble up** errors.
+
+```rust
+fn halves_if_even(i: i32) -> Result<i32, Error> {
+    if i % 2 == 0 {
+        Ok(i / 2)
+    } else {
+        Err(/* something */)
+    }
+}
+
+fn do_the_thing(i: i32) -> Result<i32, Error> {
+    let i = match halves_if_even(i) {
+        Ok(i) => i,
+        Err(e) => return Err(e),
+    };
+
+    // use `i`
+}
+```
+
+The syntax in Rust to bubble up errors is with the `?` operator:
+
+```rust
+fn do_the_thing(i: i32) -> Result<i32, Error> {
+    let i = halves_if_even(i)?;
+
+    // use `i`
+}
+```
+---
+
+### Option 
+
+Another example the `Option` type. 
+
+It takes a closure that returns an "intermediate" result as an `Option` type. 
+
+```rust 
+fn find_element(data: Vec<i32>, target: i32) -> Option<usize> {
+    let index = data.iter().position(|&x| x == target)?;
+    // do something with index
+    Some(index)
+}
+```
+
+In both cases we start inside with an intermediate value and we decide halfway based on the intermediate value if we should return early.  
+
+**Question**: How would you call this pattern? 
+
+<!-- pause -->
+
+**Answer**: I would call it one of the following:
+- **short-circuiting**
+- **terminating early**
+
+---
+
+## The fallibility effect 
+
+The question mark operator introduces a new way to change the execution flow of programs.
+
+It is a kind of **effect** since it adds something new to the way we compute.
+
+In other languages, fallibility is not as safe in Rust and you have to explicitly **catch throws**.
+
+In the following slides we will discover how fallibility is implemented in Rust.
+
+---
+
+### A casual approach to fallibility
+
+We  may start with the usual infallible function.
+
+A **fold** is an operation that folds succeeding elements onto eachother. It never fails.
+
+```rust
+fn simple_fold<A, T>(
+    iter: impl Iterator<Item = T>,
+    mut accum: A,
+    mut f: impl FnMut(A, T) -> A,
+) -> A {
+    for x in iter {
+        accum = f(accum, x);
+    }
+    accum
+}
+```
+
+The idea is clear. We accumulate the output of the accumulation function `f`.
+
+What if the accumulate function may fail and we want to **bubble up** the error?
+
+The signature of `f` will have to change.
+
+
+---
+
+## Creating a fallible fold
+
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+The standard library of Rust introduces a new trait called `Try` that has two methods:
+
+- `from_residual`: how to bubble up errors.
+- `from_output`: how to bubble up success.
+
+<!-- pause -->
+
+We can call these methods on a type `R` that implements the `Try` trait. 
+
+
+
+```rust
+pub fn explicit_fallible_fold<A, T, R: Try<Output = A>>(
+    iter: impl Iterator<Item = T>,
+    mut accum: A,
+    mut f: impl FnMut(A, T) -> R,
+) -> R {
+    for x in iter {
+        let cf = f(accum, x).branch();
+        match cf {
+            ControlFlow::Continue(a) => accum = a,
+            ControlFlow::Break(r) => return R::from_residual(r),
+        }
+    }
+    R::from_output(accum)
+}
+```
+
+
+This is a very general form and very verbose.
+
+
+<!-- column: 1 -->
+
+How can we simplify this? Remember we have the `?` operator.
+
+<!-- pause -->
+
+
+The `?` operator adds some useful syntax sugar and we can compress the match expression.
+
+```rust
+fn simple_try_fold<A, T, R: Try<Output = A>>(
+    iter: impl Iterator<Item = T>,
+    mut accum: A,
+    mut f: impl FnMut(A, T) -> R,
+) -> R {
+    for x in iter {
+        accum = f(accum, x)?;
+    }
+    R::from_output(accum)
+}
+```
+
+Notice how the inner early `return` statement became invisible. 
+
+This is adds complexity for newcomers to Rust.
+
+---
+
+### What is `Try`?
+
+Let's take a closer look at the trait `Try` that `?` uses.
+
+We need an `unstable` feature `try_trait_v2`.
+
+Formally, the `Try` trait looks as follows (simplified):
+
+```rust
+pub trait Try {
+    type Output;
+    type Residual;
+
+    fn branch(self) -> ControlFlow<Self::Residual, Self::Output>;
+
+    fn from_residual(residual: Self::Residual) -> Self;
+    fn from_output(output: Self::Output) -> Self;
+}
+```
+
+When `R: Try` we could say that `R` stands for an intermediate computation.
+
+- The associated type `Residual` is the **inner break type**, the type associated with an inner failed computation that has to be bubbled up. `R` is the type of the outer failed computation, the result after bubbling up.
+- The associated type `Output` is an **inner success type**, the success that has to be bubbled up. It can be converted to `R` with `from_output`.
+
+<!-- column: 1 -->
+
+
+The `branch` method is the core of the trait. 
+
+1. We are in the middle of the computation and encounter a fallible function
+2. We execute the fallible function and we obtain an `R` (can be thought of as a `Result`) 
+3. We see the operator `?` which is syntax sugar for conditional return
+
+At this point we arrive at the core of the `Try` trait.
+
+1. `?` will trigger the evaluation of `branch` on `R`
+2. The custom implementation of `branch` will return break or continue.
+
+There are two options:
+- **continue** with some value `a` of type `Output`.  
+  - `a` becomes the output of the the `?` operator 
+- **break** with some value of type `Residual`. 
+  - The residual is converted to some `R` (an `Option` or a `Result`)
+  - We never reach the location behind `?`
+  - The converted residual `R` is returned
+
+See [std](https://doc.rust-lang.org/std/ops/trait.Try.html)
+
+---
+
+## Concrete implementations of `Try`
+
+### `Result` 
+
+The `Result<Success,Error>` type has as associated `Try` types:
+- `Output` = `Success`
+- `Residual` = `Self`
+
+More precisely:
+
+The `Ok` variant of `Result` will trigger a `Continue` with the inner output value.
+
+```rust
+assert_eq!(Ok::<_, String>(3).branch(), ControlFlow::Continue(3));
+```
+
+A branch of an `Err` variant of the `Result` type return a `Break` that contains an instance of the associated `Residual` type.
+
+```rust
+assert_eq!(Err::<String, _>(3).branch(), ControlFlow::Break(Err(3)));
+```
+
+The content of the `Break` is passed to the `from_residual` function
+
+```rust
+assert_eq!(Result::<String, i64>::from_residual(Err(3_u8)), Err(3));
+```
+
+At the end `Success` is converted into `Result<Success, Error>` through the `from_output` function.
+
+```rust
+assert_eq!(<Result<_, String> as Try>::from_output(3), Ok(3));
+```
+
+---
+
+### `Option`
+
+The associated types of `Option<T>>` are:
+- `Output` = `T`
+- `Residual` = `Self`
+
+```rust
+assert_eq!(Some(3).branch(), ControlFlow::Continue(3));
+assert_eq!(None::<String>.branch(), ControlFlow::Break(None));
+```
+
+If we have a `Break`, the inner `None` is passed to `from_residual`:
+
+```rust
+assert_eq!(Option::<String>::from_residual(None), None);
+```
+
+
+At the end `T` is converted into `R = Option<T>` through the `from_output` function: 
+
+```rust
+assert_eq!(<Option<_> as Try>::from_output(4), Some(4));
+```
+
+Evaluating the `?` operator will trigger the branch function and then output a value of associated type `Output = T`:
+
+```rust
+assert_eq!(Option::from_output(4)?, 4);
+```
+
+
 
 
 ### Summary
