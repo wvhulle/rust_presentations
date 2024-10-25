@@ -54,7 +54,7 @@ trait Animal {
 Features:
 
 - The value for which we want to call a method is `self`. 
-- The type of `self` is `Self`, but it can also be, for example, `Rc<Self>`.
+- The type of `self` is `Self` by default, but it can also be any `Deref<Self>` such as `Rc<Self>`.
 - You can add default function implementations.
 
 ---
@@ -90,7 +90,7 @@ Orphan rules:
 
 Imagine you have some cool type called `Session`. 
 
-For some reason, it cannot be `clone`.
+For some reason, it cannot be `Clone`.
 
 But you want to share it.
 
@@ -345,6 +345,14 @@ Key point: auto-referencing always uses the **minimal amount of references**.
 
 ---
 
+## Summary of the `.` operator
+
+Performs:
+- auto-dereferencing `Deref<T>` types.
+- auto-referencing (prefering immutable references)
+
+---
+
 ## Polymorphism
 
 <!-- column_layout: [1, 1] -->
@@ -379,8 +387,14 @@ Generic standard library data types
 
 ### Algebraic data types
 
+Inspired from mathematical computer science.
 
+Not every language has them:
 
+- Product types = structs
+- Sums = enums
+
+Allow consistent pattern matching. 
 
 ---
 
@@ -447,6 +461,12 @@ impl<T, U> Point<T, U> {
 }
 ```
 <!-- column: 1 -->
+
+The more type parameters that your structs or methods get and the deeper your architecture becomes, the more type parameters you have to specify in `impl` blocks. 
+
+So structs and methods should take as few type parameters as possible.
+
+<!-- pause -->
 
 You can also decide to only implement for specific concrete type parameters:
 
