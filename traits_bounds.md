@@ -1,6 +1,6 @@
 ---
-title: Advanced Rust, part 1
-sub_title: Generics, super-traits, trait bounds
+title: Advanced Rust
+sub_title: Traits, closures and type elision
 author: Willem Vanhulle
 options:
   end_slide_shorthand: true
@@ -11,10 +11,18 @@ options:
 
 Mix of information and quizes (from Tolnay) about:
 
-1. Traits
-2. Generics
-3. Supertraits
-4. Trait bounds
+- Traits
+- Generics
+- Super-traits
+- Common trait bounds
+- Life-time bounds
+- Function traits
+- Function items
+- Closures
+- Impl trait
+- Trait objects
+- Iterators
+- Fallible computations
 
 
 Who is already familiar with these topics?
@@ -42,18 +50,86 @@ trait Animal {
 
 Features:
 
-- The struct implemented corresponds to the argument `self`.
+- The value for which we want to call a method is `self`. 
+- The type of `self` is `Self` by default, but it can also be any `Deref<Self>` such as `Rc<Self>`.
 - You can add default function implementations.
 
 ---
 
+## Orphan rule
+
+**Question**: What does **foreign** mean in the context of traits and types? 
+
+<!-- pause -->
+
+**Answer**: Things defined in other crates and in the standard library.
+
+To prevent inconsistencies after imports, there is the **orphan rule**.
+
+Orphan rules:
+- foreign traits cannot be implemented for foreign data types
+- you cannot write `impl` blocks (without trait) for foreign types 
+
+**Question** Why? 
+
+<!-- pause -->
+
+**Answer**: `impl` blocks are visible everywhere. Implementing a trait for a struct in a crate, shouldn't be able to cause another dependent crate to stop compiling. This means there are restrictions on defining `impl` blocks.
+
+---
+
+## Type aliases
+
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+Imagine you have some cool type called `Session`. 
+
+For some reason, it cannot be `Clone`.
+
+But you want to share it.
+
+You define a type alias:
+
+```rust
+type SharedSession = Arc<Session>
+```
+
+Now you want to write `impl` blocks on `SharedSession` and define a function. 
+
+<!-- column: 1 -->
+
+```rust
+impl SharedSession {
+    pub fn create_subscriber(&self) {}
+}
+```
+
+This won't work, since `Arc` is foreign (it is in the standard library). 
+
+You need to introduce a local trait first.
+
+```rust
+impl Subscribable for SharedSession {
+    pub fn create_subscriber(&self) {}
+}
+```
+---
+
 ### How do you use traits?
 
-Things we might like about traits:
+Designing traits is a very sensitive subject.
 
-- **Minimal**: just the methods you need. (You can use super-traits to extend.)
-- **Composable**: not mutually exclusive with other traits. (You can use combined traits.)
-- What else do you like about traits ...?
+The way I like to structure my traits:
+
+- **Minimal**: just the methods you need, no less than 2, no more than 5, but 
+  - avoid single-method traits since traits add some boilerplate. 
+  - if you discover "more minimal than others" methods, use super-traits or combined super-traits (see later) 
+- **Composable**: methods that are  **not locally or temporaly dependent** on each others execution throughout the life-time of the program, should go into disjoint traits and used as combined super-traits.
+
+How do you do your traits?
 
 One of the inspirations behind the trait system of Rust:
 
@@ -266,6 +342,14 @@ Key point: auto-referencing always uses the **minimal amount of references**.
 
 ---
 
+## Summary of the `.` operator
+
+Performs:
+- auto-dereferencing `Deref<T>` types.
+- auto-referencing (prefering immutable references)
+
+---
+
 ## Polymorphism
 
 <!-- column_layout: [1, 1] -->
@@ -284,26 +368,39 @@ Primitive:
 - References: `&T`
 - Slices: `&[T]`
 - Tuples
+
+Algebraic data types
 - Structs
 - Enums
 
-Standard library data types
+Generic standard library data types
 
 - Collections: `HashMap`
 - Result
 - Option 
 - Future
   
-
-
 <!-- column: 1 -->
+
+### Algebraic data types
+
+Inspired from mathematical computer science.
+
+Not every language has them:
+
+- Product types = structs
+- Sums = enums
+
+Allow consistent pattern matching. 
+
+---
 
 ### Polymorphic functions
 
 Functions that take a type parameter.
 
 - Can be free-standing (outside `impl` blocks)
-- Inside an `impl` block
+- Methods inside an `impl` block
 
 You can start with a free version and then an `impl` version.
 
@@ -363,6 +460,12 @@ impl<T, U> Point<T, U> {
 }
 ```
 <!-- column: 1 -->
+
+The more type parameters that your structs or methods get and the deeper your architecture becomes, the more type parameters you have to specify in `impl` blocks. 
+
+So structs and methods should take as few type parameters as possible.
+
+<!-- pause -->
 
 You can also decide to only implement for specific concrete type parameters:
 
@@ -487,7 +590,9 @@ struct Buffer<T> { data: Vec<T> }
 
 <!-- column: 1  -->
 
-Specify `T` as the associated type `Item`. 
+Introduce a type parameter `T` and assign it to the name of the associated type `Item`.
+
+It goes inside the body of the `impl`, **not in the header**.
 
 ```rust
 impl<T> IntoIterator for Buffer<T> {
@@ -624,7 +729,7 @@ impl<T: Add<Output = T>> Add for Point<T> {
 
 Remember that `impl` blocks are visible **everywhere**. 
 
-To prevent inconsistencies, blanket implementations of **foreign traits cannot be applied to foreign data types**.
+To prevent inconsistencies, blanket implementations of **foreign traits cannot be applied to foreign data types**. 
 
 [See](https://doc.rust-lang.org/book/ch10-02-traits.html)
 
@@ -750,13 +855,15 @@ impl CompSciStudent for Someone  {
 
 ---
 
-## Super traits and method resolution
+## Subclassing
 
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
 
-We define two traits. One is a super-trait of the other.
+If you come from any other object-oriented programming language. You might want to override methods in super-traits.
+
+This is how such a program would look.
 
 ```rust
 pub trait SuperTrait {
@@ -778,31 +885,27 @@ impl SuperTrait for char { }
 impl SubTrait for char { }
 ```
 
+
 <!-- column: 1 -->
 
-
+Then you call 
 ```rust
 fn main() {
     '?'.method()
 }
 ```
 
-**Question**: what will this program output?
+It will not compile.
 
 <!-- pause -->
 
-**Answer**: Rust does not allow ambiguous method names
-
-
-```txt
-   |
-24 |     '?'.method()
-   |         ^^^^^^ multiple `method` found
-```
-
 Explicit qualification of the trait is necessary.
 
-Overriding methods won't work. This rule is to keep code predictable. Traits can only **extend supertraits** with methods that are not yet in the super-trait.
+**Question**: Why? 
+
+<!-- pause -->
+
+**Answer**: To keep behaviour of complex code with many super-traits predictable. Traits can only **extend supertraits** with methods that are not yet in the super-trait.
 
 ---
 
@@ -811,6 +914,12 @@ Overriding methods won't work. This rule is to keep code predictable. Traits can
 <!-- column_layout: [1, 1] -->
 
 <!-- column: 0 -->
+
+**Question**: How do you use super-traits?
+
+<!-- pause -->
+
+### Use case 1: Repeated trait bounds
 
 The first place were super-traits can be useful is when we have different `impl` blocks that have the same set of trait bounds in `where` blocks.
 
@@ -836,8 +945,7 @@ For example, if we have a super-trait defined as
 ```rust
 trait SuperTrait {
     type State;
-
-    ....
+    type SuperState;
 }
 ```
 
@@ -847,68 +955,40 @@ Then we can specify a sub-trait that extends (implements) all `SuperTrait` for w
 trait SubTrait: SuperTrait<State: Sync> {}
 ```
 
+Note that it is not necessary to specify bounds on **all the associated types**.
+
 ---
 
-### Weird stuff
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
+## Weird stuff
 
 ### Introducing new associated types
 
-You can go also introduce a new associated type in `SubTrait`. Then you can refer to this new associated type in the `SuperTrait`.
+Let assume we still have the super-trait
+
+```rust
+trait SuperTrait {
+    type State;
+    type SuperState;
+}
+```
+
+We can introduce a new associated type in `SubTrait`. Then you can refer to this new associated type in the `SuperTrait`.
 
 ```rust
 trait SubTrait: SuperTrait<State=Self::SubState> {
     type SubState
 }
-```
-
-However, this won't work:
-
-```rust
-trait SuperTrait {
-    type State;
-}
-
-trait SubTrait: SuperTrait<State: Self::SubState> {
-    type SubState;
-}
-```
-
-<!-- pause -->
-
-<!-- column: 1 -->
-
-### Life-times
-
-You might be in the position that the associated type of the super-trait has a lifetime parameter.
-
-This won't work:
-
-```rust
-trait SuperTrait {
-    type State<'a>;
-}
 
 trait SubTrait: SuperTrait<State: Sync> { }
 ```
 
-You need to declare a lifetime:
-
-```rust
-trait SuperTrait {
-    type State<'a>;
-}
-
-trait SubTrait: for<'a> SuperTrait<State<'a>: Sync> { }
-``` 
-(Notice how the `for<'a>` appears in front of the supertrait.)
+Note that we don't have to specify all the associated types of the super-trait. 
 
 ---
 
 ## What are some common trait bounds?
+
+<!-- pause -->
 
 <!-- column_layout: [1, 1] -->
 
@@ -922,7 +1002,7 @@ What does `Send` for a type mean in practice?
 - It's ownership can be transferred to other thread
 - The other thread becomes responsible for dropping object
 
-Also applies to async tasks since they use **worker threads**.
+Also applies to types sent to async tasks since they might have to go to **worker threads**.
 
 Structs without references are `Send`.
 
@@ -943,7 +1023,7 @@ How can we derive if something is `Sync`? There are some rules:
 - References are in one-to-one corresponds with references that point to references (`&T <=> &&T`). This implies that `T : Sync <=> &T : Sync`.
 - A consequence of this is that if `T: !Sync` then `&T: !Sync`
 
-The most common example is a shared immutable reference `Arc` which can be shared accross threads.
+The most common example of a `Sync` type is a shared immutable reference `Arc` which can be shared accross threads.
 
 The single-threaded `Rc` is not `Sync` since it doeesn't use atomic variables underneath, but has lower overhead.
 
@@ -998,14 +1078,18 @@ Types that may be accessed from any thread but only one at a time
 
 `Cell` and `RefCell` are  both not `Sync` because they have **interior mutability**. This means you can modify the value inside with only an immutable reference. This would be a data race if you could do it from several threads in parallel, so it is not `Sync`. 
 
-They are `Send` if their inner type is `Send` they can be transferred safely.
+They are `Send` if their inner type is `Send`.
 
 ### `!Send + !Sync` 
 
 Types that manipulate shared handles to `!Sync` types
 
-- `Rc<T>` since it would be a data race to access them from different threads in parallel. This rules out both `Send` and `Sync`, since both of them would allow immutable access from other threads, and that other thread could use that to call `.clone()` remotely and obtain an `Rc<T>` on the other thread.
-- Raw pointers (I don't know anything about this.)
+`Rc<T>`
+
+- **not** `Send`: since you would be able to clone and then send it to a different thread. This would mean two different `Rc<T>` pointing to `T` from two different threads. `Rc<T>` is not built for that.
+- **not** `Sync`: because `Rc<T>` is not `Send`, so `&T` is not `Send` and we know from before that `T : Sync <=> &T : Sync`.
+
+Raw pointers (I don't know anything about this.)
 
 <!-- column: 1 -->
 
@@ -1014,8 +1098,8 @@ Types that manipulate shared handles to `!Sync` types
 Rare combination: may be accessed immutably from any thread and multiple in parallel
 
 Example: `MutexGuard` of a `T`
-- cannot be dropped in a different thread to prevent data races so it is not `Send`
-- If `T` is sync then it follows from `T : Sync ⇔ &'_ T : Sync` that a `MutexGuard<T>` is Sync
+- cannot be dropped in a different thread to prevent data races so it is not `Send`.
+- If `T` is `Sync` then it follows from `T : Sync <=> &T : Sync` and from the fact that we can obtain a reference `&T` from `MutexGuard<T>`  that a `MutexGuard<T>` is `Sync`.
 
 
 [See](https://users.rust-lang.org/t/example-of-a-type-that-is-not-send/59835/3)
@@ -1027,50 +1111,119 @@ Example: `MutexGuard` of a `T`
 
 ---
 
-## Lifetime bounds
+## What about lifetime bounds?
 
-Structs or types can contain references. In that case they receive a lifetime parameter. 
+<!-- column_layout: [1, 1] -->
 
+<!-- column: 0 -->
+
+We have seen trait bounds on type parameters.
+
+It is also possible to have **lifetime bounds**.
+
+### The basics
+
+Life-times are used for static analysis.
+
+You might already know: A reference `&'a T` has a life-time `'a` if it will be valid for the duration of `'a`. 
+
+See [nomicon](https://doc.rust-lang.org/nomicon/lifetimes.html)
+
+### Lifetime bounds on type parameters
+
+The statement `T: 'a` means that all references in `T` are valid for `'a`. So we know that `&'a T => T: 'a`.
+
+**Question**: For which lifetimes `'a` can you move a `T: 'a`?
 
 <!-- pause -->
 
-**Question**: What does `T: 'a` mean?
+**Answer**: The bound is just a constraint on the life-times inside `T`, so you just have to make sure the life-time of references inside `T` are guaranteed.
 
-<!-- pause -->
-
-**Answer**: You can hold on `T` 
-- for the lifetime `'a` 
-- until you move it out
-
-
-<!-- pause -->
-
-Rules/corollary:
-
-- `&'a T => T: 'a`, since a reference to `T` of lifetime `'a` cannot be valid for `'a` if `T` itself is not valid for `'a`.
+A special kind of references are static references such as `&'static T`.  are references that remain **valid until the end** of the program.
 
 ---
 
-### Questions
+<!-- column: 1 -->
 
+### The special life-time `'static`
 
-**Question**: What does `T: 'static` mean?:
-
-<!-- pause -->
-
-**Answer**:
-- `T` does not contain any lifetimes
-- `T` is an owned variable
-
-Every type parameter for values that have to be send between (worker) threads has to have the bound `'static`.
+If `T` does not contain any non-`'static` references, then `T` receives a default lifetime bound `T: 'static`. `'static` is a reserved name for a lifetime. 
 
 <!-- pause -->
 
-**Question**: What is the difference between `T : 'static` and `&'static T`?
+There are two possibilities:
+- Either `T` does not contain any references and is an **owned variable**.
+- `T` only contains references that remain valid for the rest of the program.
 
+Where will you encounter `T: 'static`?
 
 <!-- pause -->
 
-**Answer**: 
-- `T : 'static` means that `T` must not contain any non-`'static` references.
-- `&'static T` means that this is a reference that lives forever.
+- Some container types assume that `T: 'static` such as `Box<T>`.
+- Types that are sent between threads or tasks have to be `T: 'static`.
+
+---
+
+## Life-times in traits
+
+<!-- column_layout: [1, 1] -->
+
+<!-- column: 0 -->
+
+You can declare lifetime parameters for traits.
+
+Most commonly for `struct`s that take lifetime parameters:
+
+```rust
+trait BorrowedData<'a> {
+    fn get_data(&self) -> &'a str;
+}
+```
+
+Let's say we have some struct that contains a reference:
+
+```rust
+struct DataHolder<'b> {
+    data: &'b str,
+}
+```
+
+We can implement the trait for the struct?:
+
+```rust
+impl<'a> BorrowedData<'a> for DataHolder<'a> {
+    fn get_data(&self) -> &'a str {
+        self.data
+    }
+}
+```
+
+<!-- column: 1 -->
+
+### Lifetimes in associated types
+
+A trait may specify an associated type that depends on a life-time.
+
+```rust
+trait SuperTrait {
+    type State<'a>;
+}
+```
+
+Every `impl` block will need to provided a type parametrised by life-time `'a`.
+
+
+When you want to add bounds you might try:
+
+```rust
+trait SubTrait: SuperTrait<State: Sync> { }
+```
+
+But this won't work. You need to declare a lifetime:
+
+```rust
+trait SubTrait: for<'a> SuperTrait<State<'a>: Sync> { }
+``` 
+
+(Notice how the `for<'a>` appears in front of the supertrait.)
+
