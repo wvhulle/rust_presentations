@@ -1,6 +1,6 @@
 ---
 title: Advanced Rust
-sub_title: Traits, closures and type elision
+sub_title: Traits
 author: Willem Vanhulle
 options:
   end_slide_shorthand: true
@@ -16,14 +16,6 @@ Mix of information and quizes (from Tolnay) about:
 - Super-traits
 - Common trait bounds
 - Life-time bounds
-- Function traits
-- Function items
-- Closures
-- Impl trait
-- Trait objects
-- Iterators
-- Fallible computations
-
 
 Who is already familiar with these topics?
 
