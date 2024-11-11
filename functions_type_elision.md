@@ -187,13 +187,13 @@ Recursion in function items is possible but discouraged because no tail-call opt
 | _`Fn` and `FnMut` trait_ | Yes            | Optional |
 | _`FnOnce` trait_         | Yes            | Yes      |
 
-Because they can be anonymous closures are useful for **functional programming**.
+Because they can be anonymous, closures are useful for **functional programming**.
 
 Functional programming languages require functions as **first-class citizens**.
 
 We have to be able to pass them around anonymously, which is why they are also called **anonymous functions**.
 
-In lambda-calculus closures are written using a lambda, they are also called **lambda-functions**
+In lambda-calculus closures are written using a lambda, so they are also called **lambda-functions**
 
 For example:
 
@@ -205,34 +205,6 @@ A foundation for formal verification of programming languages.
 
 See [Plato Stanford](https://plato.stanford.edu/entries/lambda-calculus/)
 
----
-
-## Closures
-
-### Async closures
-
-In this presentation
-
-On Rust stable, closures cannot be `async`. You need to do a heap allocation of a **trait object** (see further): `Pin<Box<dyn Future>>`.
-
-On Rust nightly, closures can be `async` with `#![feature(async_closure)]`.
-
-```rust
-// Instead of writing:
-fn doesnt_exactly_take_an_async_closure<F, Fut>(callback: F)
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = String>
-{ todo!() }
-
-// Write this:
-fn takes_an_async_closure<F: async FnOnce() -> String>(callback: F) { todo!() }
-// Or this:
-fn takes_an_async_closure<F: AsyncFnOnce() -> String>(callback: F) 
-```
-
-
-[See](https://blog.rust-lang.org/inside-rust/2024/08/09/async-closures-call-for-testing.html)
 
 ---
 
@@ -344,6 +316,21 @@ It is difficult to come up with non-artificial examples of non-trivial life-time
 
 **Question**: Who has an example?
 
+<!-- pause -->
+
+```rust
+fn main() {
+    let data = String::from("Hello, Rust!");
+    let closure = create_closure(&data);
+    closure();
+}
+
+fn create_closure<'a>(data: &'a str) -> impl Fn() + 'a {
+    move || {
+        println!("{}", data);
+    }
+}
+```
 
 ---
 
@@ -572,6 +559,20 @@ Properties of `Fn` closures
     - values that were moved from the containing scope (and only use them by reference afterwards)
 - can be called from anywhere, multiple times
 - Must implement `FnMut`
+
+---
+
+### Async closures
+
+On Rust stable, closures cannot be `async`. You need to put a future inside a box. This means you have to do a heap allocation. Before you can call it, it has to be pinned. 
+
+So the final output type is `Pin<Box<dyn Future>>`.
+
+On Rust nightly, closures can be `async` with `#![feature(async_closure)]`.
+
+[RFC](https://rust-lang.github.io/rfcs/3668-async-closures.html)
+[Rust blog](https://blog.rust-lang.org/inside-rust/2024/08/09/async-closures-call-for-testing.html)
+
 
 ---
 ## Function pointers
@@ -1409,11 +1410,14 @@ fn main() {
 
 <!-- column: 1 -->
 
+
+<!-- pause -->
+
 #### Long answer 
 
 
 - Dynamic dispatch:
-  - convert the argument of type BothTraits to `dyn Base`
+  - convert the argument of type `BothTraits` to `dyn Base`
   - Method call can be expanded to `<dyn Base as Base>::method`.
   - Method from a table of function pointers contained within the trait object. 
   - print 1.
@@ -1752,6 +1756,9 @@ fn main() {
 
 In this case main would print 24.
 
+<!-- pause --> 
+
+
 #### Long answer
 
 This code is parsed as 
@@ -1761,7 +1768,7 @@ This code is parsed as
 <!-- pause -->
 
 2. The type of `|| ..` is `FnOnce() -> T` where `T` is inferred to be `RangeFull`
-3. We resolve the of the `(|| ..).method()` to the method in `impl<F: FnOnce() -> T, T> Trait for F`.
+3. We resolve the method call `(|| ..).method()` to the method in `impl<F: FnOnce() -> T, T> Trait for F`.
 4. It prints `2` and returns a closure.
 5. `(|| .. .method())()` evaluates the closure and returns `4`
 
@@ -2100,6 +2107,8 @@ Notice how the inner early `return` statement became invisible.
 
 This new strange syntax **adds complexity** for newcomers to Rust.
 
+See [std](https://doc.rust-lang.org/std/ops/trait.Try.html)
+
 ---
 
 ### What is `Try` actually?
@@ -2289,7 +2298,6 @@ Coroutines, coroutine implementations, async blocks, futures, async run-times.
 You can always email me at willemvanhulle@gmail.com.
 
 See also the great book "Programming Rust" by Blandy (2021).
-
 
 This presentation was made using Markdown and a Rust tool [`presenterm`](https://github.com/mfontanini/presenterm).
 
