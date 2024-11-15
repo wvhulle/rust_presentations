@@ -76,7 +76,11 @@ Some contexts require **constant evaluation** = evaluation at compile-time.
 Examples: 
 
 - **initializer** on the right-hand side of `static` or `const` variables (**easiest way** to create data with `'static` lifetime) 
-- initializer expressions for arrays of a fixed size: `let a = [const { None }; 3]`
+- initializer expressions for arrays of a fixed size:
+
+```rust
+let a: [Option<i32>;3] = [const { None }; 3];
+```
 
 All functions called in these contexts should be marked with `const fn f(){}`.
 
