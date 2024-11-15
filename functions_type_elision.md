@@ -22,11 +22,7 @@ Mix of information and quizes (from Tolnay) about:
 
 ## Function types
 
-**Question**: Give a nice definition of a function.
-
-<!-- pause -->
-
-**Answer**: Things that **produce values**.
+> Things that **produce values**.
 
 ### Traditional function types
 
@@ -37,74 +33,84 @@ Rust has a few function-like things:
 
 ### What else?
 
-At the end of the presentation we will see other magical things that can produce values...
+<!-- pause -->
+
+Other magical things that can produce values...
 
 ---
 
-## Function traits
+## Review of function traits
 
-Function items, pointers and closures can be categorized **using the trait system** of Rust.
+Functions are categorized **using the trait system**.
 
-
-1. `Fn`: closures that do not capture mutable references and may be called infinitely
-2. `FnMut`: closures that may reference mutable variables
-3. `FnOnce`: closures that can only be called once and may move or drop variables
+1. `Fn`: Functions that do not capture mutable references and may be called infinitely
+2. `FnMut`: Functions that may reference mutable variables
+3. `FnOnce`: Functions that can only be called once and may move or drop variables
 
 Function items and function pointers **satisfy all these traits**.
 
-Closures form a ladder: `Fn => FnMut => FnOnce`. Closures will be discussed after function items.
+Closures form a ladder: `Fn => FnMut => FnOnce`. First, function items.
 
 ---
 
 ## Function items
 
-Named function declarations that implement all function traits `Fn, FnMut, FnOnce`. 
+Simplest and most fundamental kind of function. Declared with `fn`.
 
-### Free functions
+Properties:
 
-May be on top-level or nested as **helper functions**.
+- no run-time cost in terms of additional memory
+- implement all function traits `Fn, FnMut, FnOnce`. 
 
-```rust
-fn foo<T>() { }
-```
+Appear as:
 
-Methods are preferred over free functions.
-
-### Methods
-
-Methods defined in `impl` blocks of traits on concrete types also become function items.
-
-
-```rust
-trait MyTrait {
-    fn do_something(&self);
-}
-
-struct MyStruct;
-
-impl MyTrait for MyStruct {
-    fn do_something(&self) {
-        println!("Doing something!");
-    }
-}
-```
-
-The keyword `self` can be of any type derived from the type `Self`.
-
-Methods group related functions together and allow us to chain them. 
-
-**Chaining methods** improves visibility compared to function composition of free functions.
+- **Free functions**: also called **helper functions** `fn foo<T>() {}`.
+- **Methods**: defined in `impl` blocks.
 
 ---
 
-## Lifetime elision in free functions
+## Constant evaluation
 
-When function item arguments or return types have reference types, **lifetime annotations have to be added**.
+Some contexts require **constant evaluation** = evaluation at compile-time.
 
-But in some cases they can be omitted. The rules that describe this are called **lifetime elisision rules**.
+Examples: 
+
+- **initializer** on the right-hand side of `static` or `const` variables (**easiest way** to create data with `'static` lifetime) 
+- initializer expressions for arrays of a fixed size: `let a = [const { None }; 3]`
+
+All functions called in these contexts should be marked with `const fn f(){}`.
+
+Body of a `const` function has some constraints (for example no iterators)
+
+```rust
+pub const fn fibonacci(n: usize) -> usize {
+    match n {
+        0 => 0,
+        1 => 1,
+        _ => fibonacci(n - 1) + fibonacci(n - 2),
+    }
+}
+
+fn main() {
+    const RESULT: usize = fibonacci(10);
+    println!("The 10th Fibonacci number is: {}", RESULT);
+}
+```
+[Constant evaluation](https://doc.rust-lang.org/reference/const_eval.html)
+
+---
+
+## Lifetime elision 
+
+Lifetime annotations are necessary for functions that have reference types as arguments. 
+
+In some cases they can be omitted, following **lifetime elisision rules**.
+
+The compiler automatically assigns lifetimes during elision.
+
+### Free functions
 
 If there is exactly **one input lifetime position** (elided or not), that lifetime is assigned to all elided output lifetimes.
-
 
 ```rust
 fn print(s: &str);                                      // elided
@@ -112,60 +118,132 @@ fn print<'a>(s: &'a str);                               // expanded
 
 fn debug(lvl: usize, s: &str);                          // elided
 fn debug<'a>(lvl: usize, s: &'a str);                   // expanded
-
-fn substr(s: &str, until: usize) -> &str;               // elided
-fn substr<'a>(s: &'a str, until: usize) -> &'a str;     // expanded
-
-fn get_str() -> &str;                                   // ILLEGAL
-
-fn frob(s: &str, t: &str) -> &str;                      // ILLEGAL
 ```
+
+---
+
+## Lifetime practice
+
+Guess the lifetimes annotated by the compiler:
+
+```rust
+fn substr(s: &str, until: usize) -> &str;     
+```
+
+<!-- pause -->
+
+```rust
+fn substr<'a>(s: &'a str, until: usize) -> &'a str;     
+```
+
+What are the lifetimes annotated to the following?
+
+```rust
+fn get_str() -> &str;                              
+fn frob(s: &str, t: &str) -> &str;                  
+```
+<!-- pause -->
+_Illegal_ / does not compile.
+
+---
+
+## Methods
+
+In argument position, the word `self` is a keyword
+
+The type of `self` can be any **concrete** type that dereferences to `Self`:
+
+- `Self`, 
+- `&Self`, 
+- `&mut Self`, 
+
+Other possible types for `self`:
+
+- `Box<Self>`, 
+- `Rc<Self>`, 
+- `Arc<Self>`
+- `Pin<P>`
+
+<!-- pause -->
+
+The last **cannot be used as the base type** of an `impl` block (foreign type).
+
+Probably because these have different ownership semantics.
+
+Advantages of methods:
+
+<!-- pause -->
+
+- Compact notation through **chaining**.
+- Group functions related through **shared state** or **intermediate computation**.
 
 ---
 
 ## Lifetime elision in methods
 
-If there are multiple input lifetime positions, but one of them is `&self` or `&mut self`, the lifetime of the reference to `self` is assigned implicitly to all elided output lifetimes.
+In the following situation:
 
+- multiple input lifetime positions, 
+- but one of them is `&self` or `&mut self`, 
+
+Then the lifetime of the reference to `self` is assigned implicitly to all elided output lifetimes.
+
+Example:
 
 ```rust
-fn get_mut(&mut self) -> &mut T;                        // elided
-fn get_mut<'a>(&'a mut self) -> &'a mut T;              // expanded
-
-fn args<T: ToCStr>(&mut self, args: &[T]) -> &mut Command                  // elided
-fn args<'a, 'b, T: ToCStr>(&'a mut self, args: &'b [T]) -> &'a mut Command // expanded
+fn get_mut(&mut self) -> &mut T;                       
+fn get_mut<'a>(&'a mut self) -> &'a mut T;
 ```
 
+What are the expanded life-times?
+
+```rust
+fn args<T: ToCStr>(&mut self, args: &[T]) -> &mut Command                  
+```
+
+<!-- pause -->
+
+```rust
+fn args<'a, 'b, T: ToCStr>(&'a mut self, args: &'b [T]) -> &'a mut Command 
+```
 
 ---
 
 ## Implementation function items
 
-They become part of immutable code in the compiled binary.
+Part of immutable code in the compiled binary.
+
+Consequences:
+
 - can easily be cloned or copied  
-- can be optimized away `=>` no pointer needed `=>` zero-sized
+- function calls can be optimized away
 
-
-The signature of function items:
-- has to be declared in advance.
-- afterwards, you can't really refer to it. (I do not not know the details.)
-  
-The compiler will reference to them using `fn(u32) -> i32 {fn_name}`.
-
-Every distinct instantiation of a generic function item with different type parameters has its **own unique type** because the type itself **encodes the information of which body will be called**.
+Does the following compile?
 
 ```rust
-let x = &mut foo::<i32>;
-*x = foo::<u32>; //~ ERROR mismatched types
+fn foo<T>(_t: T) {}
+fn bar<T>(_t: T) {}
+fn main() {
+    let x = &mut foo::<i32>;
+    *x = bar::<i32>;
+}
 ```
-
-**Question**: How can we assign function items with compatible signatures?
 
 <!-- pause -->
 
-**Answer**: Cast them as function pointers (see in a few slides).
+No. 
 
-Recursion in function items is possible but discouraged because no tail-call optimization happens and stack overflow may happen easily.
+1. `foo` starts out as a function item.
+2. `foo::<i32>` is assigned to `x` with a _unique type_. 
+3. `bar::<i32>` is created with another _unique type_.
+4. Both types are different and cannot be stored in the same variable.
+
+What you can do is _cast_ function items as **function pointrs** (see later)
+
+```rust
+let x: &mut fn(i32) = &mut (foo::<i32> as fn(i32));
+*x = foo::<i32> as fn(i32);
+```
 
 ---
 
@@ -178,14 +256,6 @@ Recursion in function items is possible but discouraged because no tail-call opt
 
 ### What are closures?
 
-|                        | **Function items** | **Closures** |
-|------------------------|----------------|----------|
-| _Anonymous_ | No | Yes |
-| _Capture_                | No             | Optional |
-| _Recursive_              | Optional       | No       |
-| _Signature_              | Required       | Optional |
-| _`Fn` and `FnMut` trait_ | Yes            | Optional |
-| _`FnOnce` trait_         | Yes            | Yes      |
 
 Because they can be anonymous, closures are useful for **functional programming**.
 
@@ -205,6 +275,19 @@ A foundation for formal verification of programming languages.
 
 See [Plato Stanford](https://plato.stanford.edu/entries/lambda-calculus/)
 
+
+---
+
+## Function items vs. closures
+
+|                        | **Function items** | **Closures** |
+|------------------------|----------------|----------|
+| _Anonymous_ | No | Yes |
+| _Capture_                | No             | Optional |
+| _Recursive_              | Optional       | No       |
+| _Signature_              | Required       | Optional |
+| _`Fn` and `FnMut` trait_ | Yes            | Optional |
+| _`FnOnce` trait_         | Yes            | Yes      |
 
 ---
 
