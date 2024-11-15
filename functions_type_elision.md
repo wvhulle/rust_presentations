@@ -253,21 +253,10 @@ let x: &mut fn(i32) = &mut (foo::<i32> as fn(i32));
 
 ## Closures
 
----
 
-## Closures
+Anonymous functions that can capture variables.
 
-
-### What are closures?
-
-
-Because they can be anonymous, closures are useful for **functional programming**.
-
-Functional programming languages require functions as **first-class citizens**.
-
-We have to be able to pass them around anonymously, which is why they are also called **anonymous functions**.
-
-In lambda-calculus closures are written using a lambda, so they are also called **lambda-functions**
+In **lambda-calculus** closures are written using a lambda which is why they are also called **lambda-functions**
 
 For example:
 
@@ -275,27 +264,67 @@ For example:
 (λx. x + 1) 5 
 ```
 
-A foundation for formal verification of programming languages. 
+Which becomes in Rust
+
+```rust
+(|x|{x + 1})(5)
+````
+
+Lambda calculus is used as a foundation for formal verification of programming languages.
 
 See [Plato Stanford](https://plato.stanford.edu/entries/lambda-calculus/)
+
+---
+
+## Logical foundations
+
+Type theory is used to formalize the meaning and behaviour of programming languages.
+
+There are
+
+- terms: the values of your program
+- types: the role of the values
+- rules: ways to construct values
+
+
+Example of type rules:
+
+```
+————————————   ————————————
+ x:T |- x:T     x:T |- x:T
+———————————————————————————
+ x:T, x:T |- (x,x) : (T,T)
+——————————————————————————— <- contraction!!
+   x:T |- (x,x) : (T,T)
+  ———————————————————————
+   λx.(x,x) : T -> (T,T)
+```
+
+See [Lecture notes Iris](https://iris-project.org/tutorial-pdfs/iris-lecture-notes.pdf)
 
 
 ---
 
 ## Function items vs. closures
 
+We have seen function items and closures.
+
 |                        | **Function items** | **Closures** |
 |------------------------|----------------|----------|
 | _Anonymous_ | No | Yes |
-| _Capture_                | No             | Optional |
+| _Capture_                | No             | Optional | 
 | _Recursive_              | Optional       | No       |
 | _Signature_              | Required       | Optional |
 | _`Fn` and `FnMut` trait_ | Yes            | Optional |
 | _`FnOnce` trait_         | Yes            | Yes      |
 
+Closures enable us to use functional programming patterns.
+
+But all the rules of ownership and life-times still apply!
+
 ---
 
-## Closures and lifetimes
+## Closures and life-times
 
 Will the following code compile?
 
@@ -309,16 +338,6 @@ fn main() {
 
 **Answer**: No, because lifetime elision rules are different for closures compared to function items.
 
-
-```
-  |
-2 |     let closure = |x: &i32| x;
-  |                       -   - ^ returning this value requires that `'1` must outlive `'2`
-  |                       |   |
-  |                       |   return type of closure is &'2 i32
-  |                       let's call the lifetime of this reference `'1`
-```
-
 The closure definition can be expanded to:
 
 ```rust 
@@ -327,67 +346,92 @@ fn main() {
 }
 ```
 
-Two distinct lifetimes are created for the input and output type. For normal functions, only one lifetime is created.
+Two distinct lifetimes are created for the input and output type. 
+
+This is strange, because for normal functions, only one lifetime is created.
 
 
 See [Pretzelhammer](https://github.com/pretzelhammer/rust-blog/blob/master/posts/common-rust-lifetime-misconceptions.md#10-closures-follow-the-same-lifetime-elision-rules-as-functions)
 
 ---
 
-## Closure implementations
+## Closures as environments
 
-<!-- column_layout: [1, 1] -->
 
-<!-- column: 0 -->
-
-The implementation of closures is taken for granted in most dynamic languages. Many low-level languages don't have them. Rust strikes a balance, so it is important to know how closures work under the hood.
+What happens when you define a closure?
 
 The **body block of the closure is analyzed**: 
+
 1. variables in the body that refer to variables in the surrounding scope are marked as captured
-2. `struct` generated at compile time with as fields the references to the captured variables, it serves as the environment for the closure body
- 
-The generated `struct` is **invisible**. Consequences:
-- The direct type of a closure is implicit and cannot be used directly.
-- Closures can only be referenced through their trait signatures (we will need `impl Trait`, see later)
+2. Environment `struct` generated at compile time with as fields the references to the captured variables, 
+3. Life-time of the environment struct is life-time of the closure
 
-This explains why closures are called **unnameable types** or **Voldemort types**.
+The generated `struct` is **invisible**. 
 
-<!-- column: 1 -->
+Consequences:
 
-### Rough model
+- There is no kind of function type to type the signature of closures only.
+- The type of a closure can only be specified indirectly with function traits 
 
-A simple closure may be roughly modeled as follows:
+<!-- pause -->
 
+Often we have one closure as argument, 
+
+- arguments have to be typed and 
+- the type of a closure can only be referenced through a function trait, 
+
+This means we need an anonymous type argument, a single anonymous type argument is specified with the notation `impl Trait` (see later).
+
+**Question**: What is another name for a closure?
+
+<!-- pause -->
+
+**Answer**: closures are sometimes **unnameable types** or **Voldemort types**.
+
+---
+
+### Example closure environment
+
+Let's start with a very basic closure.
 ```rust
 let mut v = vec![];
 let closure = || v.push(1);
+```
 
+This is compiled down to by the compiler:
+
+```rust
 struct Environment<'v> {
     v: &'v mut Vec<i32>
 }
+```
 
+The actual closure is an `impl` block:
+
+
+```rust
 impl<'v> Fn() for Environment<'v> {
     fn call(&self) {
         self.v.push(1) // error: cannot borrow data mutably
     }
 }
-let closure = Environment { v: &mut v }
 ```
+The closure is then called like
 
+```rust
+let closure = Environment { v: &mut v };
+closure.call();
+```
 
 For details about the construction, see [Finding closure in Rust](https://huonw.github.io/blog/2015/05/finding-closure-in-rust/)
 
 
-Because closures are just `Environment` structs, they behave like structs.
+This shows how the life-time of the generated `Environment` directly corresponds to the life-time of the closure.
 
 
 ---
 
 ## Bounds on closure structs
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
 
 ### Auto-trait bounds
 
