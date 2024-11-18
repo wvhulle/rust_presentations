@@ -268,7 +268,7 @@ Which becomes in Rust
 
 ```rust
 (|x|{x + 1})(5)
-````
+```
 
 Lambda calculus is used as a foundation for formal verification of programming languages.
 
@@ -386,7 +386,7 @@ This means we need an anonymous type argument, a single anonymous type argument 
 
 <!-- pause -->
 
-**Answer**: closures are sometimes **unnameable types** or **Voldemort types**.
+**Answer**: closures are sometimes called **unnameable types** or **Voldemort types**.
 
 ---
 
@@ -410,16 +410,16 @@ The actual closure is an `impl` block:
 
 
 ```rust
-impl<'v> Fn() for Environment<'v> {
-    fn call(&self) {
-        self.v.push(1) // error: cannot borrow data mutably
+impl<'v> FnMut for Environment<'v> {
+    fn call(&mut self) {
+        self.v.push(1) 
     }
 }
 ```
 The closure is then called like
 
 ```rust
-let closure = Environment { v: &mut v };
+let mut closure = Environment { v: &mut v };
 closure.call();
 ```
 
@@ -435,119 +435,25 @@ This shows how the life-time of the generated `Environment` directly corresponds
 
 ### Auto-trait bounds
 
-Closures implement marker traits when captured content does: `Sync`, `Send`, `Copy`, `Clone`.
+Closures implement atuo traits when captured variables or references to variables do: `Sync`, `Send`, `Copy`, `Clone`.
 
-### Lifetime bounds
+### Closures that capture by reference
 
-Closure may capture data that contains references, so they can have lifetime bounds.
+By default, a closure captures references. The closure receives the lifetime bounds of the captured references.
 
-Closures that are sent between async tasks have to be `'static`.
+Only closures that capture `'static`-references can be sent between threads. Function pointers can always be sent between threads.
 
-It is difficult to come up with non-artificial examples of non-trivial life-time bounds on closures.
+### Closures that capture by value
 
-**Question**: Who has an example?
+The keyword `move` moves ownership of variables in the surrounding scope inside the environment of the closure. 
 
-<!-- pause -->
+Afterwards, the moved variables are used by reference inside the closure.
 
-```rust
-fn main() {
-    let data = String::from("Hello, Rust!");
-    let closure = create_closure(&data);
-    closure();
-}
-
-fn create_closure<'a>(data: &'a str) -> impl Fn() + 'a {
-    move || {
-        println!("{}", data);
-    }
-}
-```
-
----
-
-## Variants of closures
-
-<!-- column_layout: [1, 1] -->
-
-<!-- column: 0 -->
-
-
-We start at the bottom of the ladder with the type of closures that can **do the most** but are also the **least widely applicable**.
-
-**Question**: What trait is associated with this type of closures?
+**Question**: Which `move` closures are `FnOnce`?
 
 <!-- pause -->
 
-### The base case `FnOnce`
-
-The least a closure should be able to do is be called once = the **base case**.
-
-Imagine the following closure:
-
-```rust
-let mut v = vec![];
-let closure = move || v.push(1);
-```
-
-**Question**: What does this compile to?
-
-<!-- pause -->
-
-```rust
-struct Environment {
-    v: Vec<i32>
-}
-
-impl FnOnce() for Environment {
-    fn call(self) {
-        self.v.push(1)
-    }
-}
-let closure = Environment { v }
-```
-
-
-<!-- column: 1 -->
-
-Notice how **capture-by-value** works:
-
-1. we mark the closure as call by value with `move`.
-2. the generated environment `struct` takes ownership of the local variable `v`. 
-
-In the `struct` of a `FnOnce` closure the signature of `call` is written as `call(self)` which means that it's type is `Environment -> ()`. 
-
-In general, the body of a `FnOnce` closure may:
-
-- mutate captured mutable variables or references.
-- move references or variables captured by value with `move` into new structs
-- drop variables captured by value with `move`
-
-What can closures **not do**: drop things that are referenced elsewhere.
-
----
-
-### Move
-
-In practice, closures cannot just consume their environment. 
-
-You need to explicitly mark closures as **consuming** their environment with a keyword `move`.
-- takes ownership of variables in the surrounding scope
-- inside the closure the captured and moved variables are used by reference
-
-
-```rust
-let data = vec![1, 2, 3];
-let closure = move || println!("captured {data:?} by value");
-```
-
-
-**Question**: is every `move` closure `FnOnce`?
-
-<!-- pause -->
-
-**Answer**: No, 
-- if a closure captures something by reference the reference is moved inside the implicit struct. Afterwards the call function of the struct can  be called multiple times and the body uses the captured variables by reference. The reference stays in between executions. 
-- If a closure captures something by value, the body of the call function will use it by reference. If you move it, then the closure becomes `FnOnce`.
+**Answer**: The ones that move inside and drop, return or move outside.
 
 ---
 
@@ -603,6 +509,10 @@ Hint: did you hear about the never type `!`?
 4. `bool || true;` evaluates to `()`
 5. `f` is implemented for `()` to output `2`.
 
+How can we make it return 1?
+
+<!-- pause -->
+
 ```rust
 fn main() {
     let x = || { return || true; };
@@ -614,96 +524,34 @@ Will output 1 since a call to x returns another closure that returns a bool.
 
 ---
 
-### Closures that are `FnMut`
+## Async closures
 
-<!-- column_layout: [1, 1] -->
+On Rust stable, closures cannot be `async`.
 
-<!-- column: 0 -->
+### First limitation
 
-A basic example is:
-
-
-```rust
-let mut x = 5;
-{
-    let mut square_x = || x *= x;
-    square_x();
-}
-assert_eq!(x, 25);
-```
-
-This compiles to
+You cannot borrow inside the returned future. This is solved in nightly (with `#![feature(async_closure)]`):
 
 ```rust
-struct Environment<'v> {
-    v: &'v mut Vec<i32>
-}
+let message = "Hello from borrowed variable!";
 
-impl<'v> Fn() for Environment<'v> {
-    fn call(&mut self) {
-        self.v.push(1)
-    }
-}
+let async_closure =  async |name: &str| {
+    println!("{} {}", message, name);
+};
+
+async_closure("Alice").await;
+async_closure("Bob").await;
+println!("{}", message);
 ```
 
-<!-- column: 1 -->
+### Second limitation
 
+You cannot pass an `async` closure as argument to a higher-order function.
 
-The signature of the `call` method on the implicit struct is `call(&mut self)`.
-
-The struct may have
-- mutable references to its containing scope (but importantly, does **not need to**)
-- immutable references to its containing scope
-
-
-Compared to `FnOnce`, a `FnMut` closure:
-- cannot consume or move out captured variables
-- can be called more than once for sure, so it must implement `FnOnce`
-- can only be called once at a time, 
-
-
----
-
-### `Fn` function trait
-
-The **least capable** but also the **most widely useful** closures are those with the `Fn` trait.
-
-We modify the signature of the `call` method slightly.
-
-```rust
-struct Environment<'v> {
-    v: &'v mut Vec<i32>
-}
-
-impl<'v> Fn() for Environment<'v> {
-    fn call(&self) {
-        self.v.push(1) // error: cannot borrow data mutably
-    }
-}
-```
-
-The signature is `call(&self)`.
-
-Properties of `Fn` closures
-- the body may only have
-    - immutable references to its containing scope
-    - values that were moved from the containing scope (and only use them by reference afterwards)
-- can be called from anywhere, multiple times
-- Must implement `FnMut`
-
----
-
-### Async closures
-
-On Rust stable, closures cannot be `async`. You need to put a future inside a box. This means you have to do a heap allocation. Before you can call it, it has to be pinned. 
-
-So the final output type is `Pin<Box<dyn Future>>`.
-
-On Rust nightly, closures can be `async` with `#![feature(async_closure)]`.
+Solution: new async traits `AsyncFnMut`, `AsyncFn`
 
 [RFC](https://rust-lang.github.io/rfcs/3668-async-closures.html)
 [Rust blog](https://blog.rust-lang.org/inside-rust/2024/08/09/async-closures-call-for-testing.html)
-
 
 ---
 ## Function pointers
@@ -714,14 +562,10 @@ On Rust nightly, closures can be `async` with `#![feature(async_closure)]`.
 
 A type of functions that do not have to be named and implement all traits `Fn, FnMut, FnOnce`. 
 
-This makes them somewhat of a mix between 
+- less powerful than closures
+- similar to references to function items
 
-- weak closures and 
-- references to function items
-
-They are a kind of **pointers to free function items**. 
-
-The **type of a function pointer** is denoted with `fn() -> ()`. 
+The **type** of a function pointer is denoted with `fn() -> ()`. 
 
 ### Construction
 
